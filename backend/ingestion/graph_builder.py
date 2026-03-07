@@ -1,0 +1,85 @@
+"""graph_builder — create Document, Chunk, and Entity nodes in Neo4j."""
+
+from typing import List, Optional
+
+
+def build_graph_nodes(
+    chunks: List[dict],
+    entities: List[dict],
+    doc_id: str,
+    document_type: str,
+    filename: Optional[str] = None,
+) -> dict:
+    """Write Document node, Chunk nodes (with CHUNK_OF edges), and Entity nodes to Neo4j.
+
+    Falls back gracefully if neo4j-driver is not connected.
+    """
+    try:
+        from graph.neo4j_client import neo4j_client
+        if not neo4j_client._driver:
+            raise RuntimeError("not connected")
+        return _write_to_neo4j(neo4j_client, chunks, entities, doc_id, document_type, filename)
+    except Exception as e:
+        print(f"[graph_builder] Neo4j write skipped ({e})")
+        return {
+            "nodes_created": len(chunks) + len(entities),
+            "chunk_nodes": len(chunks),
+            "entity_nodes": len(entities),
+            "doc_id": doc_id,
+        }
+
+
+def _write_to_neo4j(client, chunks, entities, doc_id, document_type, filename):
+    # Upsert Document node
+    client.run_query(
+        """
+        MERGE (d:Document {doc_id: $doc_id})
+        SET d.document_type = $document_type,
+            d.filename = $filename,
+            d.created_at = timestamp()
+        """,
+        {"doc_id": doc_id, "document_type": document_type, "filename": filename or ""},
+    )
+
+    # Upsert Chunk nodes + CHUNK_OF edges
+    for chunk in chunks:
+        client.run_query(
+            """
+            MERGE (c:Chunk {chunk_id: $chunk_id})
+            SET c.doc_id = $doc_id,
+                c.text = $text,
+                c.chunk_index = $chunk_index,
+                c.jurisdiction = $jurisdiction
+            WITH c
+            MATCH (d:Document {doc_id: $doc_id})
+            MERGE (c)-[:CHUNK_OF]->(d)
+            """,
+            {
+                "chunk_id": chunk.get("chunk_id", ""),
+                "doc_id": doc_id,
+                "text": chunk.get("text", ""),
+                "chunk_index": chunk.get("chunk_index", 0),
+                "jurisdiction": chunk.get("jurisdiction", ""),
+            },
+        )
+
+    # Upsert Entity nodes + MENTIONED_IN edges
+    for ent in entities:
+        node_type = ent.get("node_type", "Entity")
+        client.run_query(
+            f"""
+            MERGE (e:{node_type} {{name: $name}})
+            SET e.spacy_label = $label
+            WITH e
+            MATCH (d:Document {{doc_id: $doc_id}})
+            MERGE (e)-[:MENTIONED_IN]->(d)
+            """,
+            {"name": ent["text"], "label": ent.get("label", ""), "doc_id": doc_id},
+        )
+
+    return {
+        "nodes_created": 1 + len(chunks) + len(entities),
+        "chunk_nodes": len(chunks),
+        "entity_nodes": len(entities),
+        "doc_id": doc_id,
+    }

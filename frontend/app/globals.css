@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #2D4FD6;
+  --navy: #1E3A5F;
+  --accent: #4F46E5;
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #6B7280;
+  --border: #E5E7EB;
+  --border-light: #F3F4F6;
+  --bg-page: #F5F6F8;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F9FAFB;
+  --indigo-light: #EEF2FF;
+  --indigo-border: #C7D2FA;
+
+  --critical: #DC2626;
+  --critical-bg: #FEF2F2;
+  --critical-border: #FECACA;
+  --high: #EA580C;
+  --high-bg: #FFF7ED;
+  --high-border: #FED7AA;
+  --medium: #D97706;
+  --medium-bg: #FEFCE8;
+  --medium-border: #FDE68A;
+  --ok: #16A34A;
+  --ok-bg: #F0FDF4;
+  --ok-border: #BBF7D0;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F3F5;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: #D1D5DB;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF;
+}
+
+/* Typing indicator animation */
+@keyframes typing-bounce {
+  0%, 100% { transform: scale(0.6); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
+.typing-dot {
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Step pulse animation */
+@keyframes step-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 79, 214, 0.3); }
+  50% { box-shadow: 0 0 0 6px rgba(45, 79, 214, 0); }
+}
+
+.step-active {
+  animation: step-pulse 1.5s ease-in-out infinite;
+}

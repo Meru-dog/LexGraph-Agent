@@ -1,0 +1,56 @@
+[tool.poetry]
+name = "lexgraph-ai"
+version = "0.1.0"
+description = "LexGraph AI — Graph RAG legal research platform for JP/US dual-jurisdiction practice"
+authors = ["LexGraph AI Team"]
+readme = "RDD.md"
+packages = [{ include = "backend" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.111.0"
+uvicorn = { version = "^0.30.0", extras = ["standard"] }
+pydantic = "^2.7.0"
+python-multipart = "^0.0.9"
+langgraph = "^0.2.0"
+langchain-core = "^0.2.0"
+langchain-google-genai = "^1.0.0"
+google-generativeai = "^0.7.0"
+neo4j = "^5.20.0"
+faiss-cpu = "^1.8.0"
+sentence-transformers = "^3.0.0"
+spacy = "^3.7.0"
+langdetect = "^1.0.9"
+python-dotenv = "^1.0.0"
+aiofiles = "^23.2.0"
+httpx = "^0.27.0"
+pdfplumber = "^0.11.0"
+python-docx = "^1.1.0"
+reportlab = "^4.2.0"
+websockets = "^12.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+ruff = "^0.4.0"
+
+[tool.poetry.group.training]
+optional = true
+
+[tool.poetry.group.training.dependencies]
+transformers = "^4.40.0"
+peft = "^0.11.0"
+trl = "^0.8.0"
+bitsandbytes = "^0.43.0"
+datasets = "^2.19.0"
+accelerate = "^0.30.0"
+torch = "^2.3.0"
+scikit-learn = "^1.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

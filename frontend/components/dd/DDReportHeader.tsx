@@ -45,7 +45,7 @@ export default function DDReportHeader({ report }: Props) {
       {/* Metadata grid */}
       <div className="grid grid-cols-4 gap-2 mb-4">
         {[
-          { label: "Prepared By", value: "LexGraph AI" },
+          { label: "Prepared By", value: "LexGraph Agent" },
           { label: "Report Date", value: report.date },
           { label: "Jurisdiction", value: report.jurisdiction },
           {

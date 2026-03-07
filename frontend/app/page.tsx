@@ -34,7 +34,7 @@ export default function ChatPage() {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Legal Research Chat"
-        subtitle="Graph RAG · JP/US Law · LLaMA 3.1 Fine-tuned"
+        subtitle="Graph RAG · JP/US Law · Gemini 1.5 Pro"
         right={
           <div className="flex gap-1.5 flex-wrap items-center">
             {/* Jurisdiction toggle */}
@@ -98,7 +98,7 @@ export default function ChatPage() {
             disabled={streaming}
           />
           <p className="text-center text-[11px] text-[#D1D5DB] pb-3">
-            LexGraph AI · JP/US Dual-Jurisdiction · Graph RAG + Fine-tuned LLaMA 3.1
+            LexGraph Agent · JP/US Dual-Jurisdiction · Graph RAG + Gemini 1.5 Pro
           </p>
         </div>
       </div>

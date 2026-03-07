@@ -41,10 +41,10 @@ export default function LoginPage() {
             className="text-[26px] text-[#111827] leading-tight"
             style={{ fontFamily: "var(--font-dm-serif)" }}
           >
-            LexGraph AI
+            LexGraph Agent
           </div>
           <div className="text-[10px] uppercase tracking-[1.5px] text-[#9CA3AF] mt-0.5">
-            AI Legal Research Platform
+            Legal AI Platform
           </div>
         </div>
 

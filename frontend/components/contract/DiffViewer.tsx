@@ -68,7 +68,7 @@ export default function DiffViewer({ diff, filename }: Props) {
                 className="sticky top-0 px-3 py-1.5 text-[12px] font-semibold z-10"
                 style={{ background: "#F0FDF4", color: "#15803D", fontFamily: "var(--font-ibm-plex-mono)" }}
               >
-                + AI Redline
+                + AI Redline (as Counsel)
               </div>
               <div className="text-[12px]">
                 {addedLines.map((line, i) => <DiffLine key={i} line={line} />)}

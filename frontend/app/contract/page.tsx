@@ -7,7 +7,7 @@ import DiffViewer from "@/components/contract/DiffViewer";
 import { useContractReview } from "@/hooks/useContractReview";
 import { downloadRedlinedDocx } from "@/lib/api";
 import { MOCK_DIFF, MOCK_CLAUSE_ANNOTATIONS } from "@/lib/mockData";
-import { countDiffStats } from "@/lib/diff";
+import { diffLines, countDiffStats } from "@/lib/diff";
 import type { DiffLine, ClauseAnnotation } from "@/lib/types";
 
 export default function ContractReviewPage() {
@@ -21,10 +21,30 @@ export default function ContractReviewPage() {
     });
   };
 
-  // Prefer real diff/clauses from agent result; fall back to mock for UI preview
-  const diff: DiffLine[] = (result?.diff as DiffLine[]) ?? MOCK_DIFF;
-  const clauses: ClauseAnnotation[] =
-    (result?.clauses as ClauseAnnotation[]) ?? MOCK_CLAUSE_ANNOTATIONS;
+  // Compute diff from backend original_text + reviewed_text when available
+  const diff: DiffLine[] = (() => {
+    const orig = result?.original_text as string | undefined;
+    const rev = result?.reviewed_text as string | undefined;
+    if (orig && rev) return diffLines(orig, rev);
+    return MOCK_DIFF;
+  })();
+
+  // Map backend clause_reviews to ClauseAnnotation format
+  const clauses: ClauseAnnotation[] = (() => {
+    const reviews = result?.clause_reviews as
+      | { clause_id: string; risk_level: string; issues: string[] }[]
+      | undefined;
+    if (reviews?.length) {
+      return reviews.map((r) => ({
+        clauseRef: r.clause_id,
+        title: r.clause_id,
+        risk: (r.risk_level as ClauseAnnotation["risk"]) ?? "ok",
+        notes: r.issues?.join("; ") ?? "",
+      }));
+    }
+    return MOCK_CLAUSE_ANNOTATIONS;
+  })();
+
   const stats = countDiffStats(diff);
 
   const isReviewed = status === "complete";
@@ -35,6 +55,11 @@ export default function ContractReviewPage() {
     <div className="flex h-full">
       {/* Left panel */}
       <div className="w-[296px] flex-shrink-0 border-r border-[#E5E7EB] bg-white flex flex-col h-full overflow-y-auto">
+        {/* Panel header */}
+        <div className="px-5 pt-[18px] pb-[14px] border-b border-[#F3F4F6]">
+          <div className="text-[15px] font-semibold text-[#111827]">Contract Review</div>
+          <div className="text-[11px] text-[#9CA3AF] mt-0.5">AI redlining as legal counsel</div>
+        </div>
         <div className="p-5 flex flex-col gap-4">
           {!hasFile ? (
             <UploadZone onFile={handleFile} />
@@ -113,7 +138,7 @@ export default function ContractReviewPage() {
       <div className="flex-1 overflow-hidden flex flex-col bg-[#F5F6F8]">
         <PageHeader
           title="Contract Review"
-          subtitle="AI redlining · JP/US compliance · LangGraph agent"
+          subtitle="AI redlining as legal counsel · JP/US compliance · LangGraph agent"
         />
 
         <div className="flex-1 overflow-hidden">

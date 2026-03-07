@@ -84,6 +84,15 @@ export async function uploadDocument(file: File, documentType: string) {
   return res.json();
 }
 
+export async function ingestDocument(docId: string) {
+  const res = await fetch(`${BASE_URL}/ingest/${docId}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Ingest failed: ${res.status}`);
+  return res.json() as Promise<{ doc_id: string; vectors_indexed: number }>;
+}
+
 // ─── DD Agent ─────────────────────────────────────────────────────────────────
 
 export async function startDDAgent(payload: {

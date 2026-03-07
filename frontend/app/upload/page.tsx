@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import PageHeader from "@/components/layout/PageHeader";
+import { uploadDocument, ingestDocument } from "@/lib/api";
 
 const DOC_TYPES = [
   "Statute",
@@ -12,12 +13,15 @@ const DOC_TYPES = [
   "Other",
 ];
 
-type ProcessStep = {
-  label: string;
-  state: "pending" | "running" | "done";
-};
+type StepState = "pending" | "running" | "done" | "error";
 
-const PROCESS_STEPS: string[] = [
+interface ProcessStep {
+  label: string;
+  state: StepState;
+  detail?: string;
+}
+
+const STEP_LABELS = [
   "Extracting text",
   "Chunking (512 tokens, 64 overlap)",
   "NER extraction",
@@ -32,57 +36,89 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [steps, setSteps] = useState<ProcessStep[]>([]);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const startProcessing = (f: File) => {
+  const setStep = (index: number, state: StepState, detail?: string) => {
+    setSteps((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], state, detail };
+      return updated;
+    });
+  };
+
+  const markPreviousDone = (upToIndex: number) => {
+    setSteps((prev) => {
+      const updated = [...prev];
+      for (let i = 0; i < upToIndex; i++) {
+        if (updated[i].state === "running") {
+          updated[i] = { ...updated[i], state: "done" };
+        }
+      }
+      return updated;
+    });
+  };
+
+  const processFile = async (f: File) => {
     setFile(f);
     setDone(false);
-    const initial: ProcessStep[] = PROCESS_STEPS.map((label) => ({
-      label,
-      state: "pending",
-    }));
-    setSteps(initial);
+    setError(null);
+    setSteps(STEP_LABELS.map((label) => ({ label, state: "pending" })));
 
-    // Advance steps sequentially
-    PROCESS_STEPS.forEach((_, i) => {
-      setTimeout(() => {
-        setSteps((prev) => {
-          const updated = [...prev];
-          if (i > 0) updated[i - 1] = { ...updated[i - 1], state: "done" };
-          updated[i] = { ...updated[i], state: "running" };
-          return updated;
-        });
-      }, i * 900);
+    try {
+      // Steps 0–3: text extraction, chunking, NER, graph — handled by POST /upload
+      setStep(0, "running");
 
-      if (i === PROCESS_STEPS.length - 1) {
-        setTimeout(() => {
-          setSteps((prev) => {
-            const updated = [...prev];
-            updated[i] = { ...updated[i], state: "done" };
-            return updated;
-          });
-          setDone(true);
-        }, (i + 1) * 900);
+      const uploadResult = await uploadDocument(f, docType.toLowerCase().replace(" ", "_"));
+
+      // Mark steps 0–3 done based on backend response
+      const processingSteps: { step: string; status: string }[] = uploadResult.processing_steps ?? [];
+      const stepMap: Record<string, number> = {
+        text_extraction: 0,
+        chunking: 1,
+        ner_extraction: 2,
+        graph_node_creation: 3,
+      };
+
+      markPreviousDone(4);
+      for (const s of processingSteps) {
+        const idx = stepMap[s.step];
+        if (idx !== undefined) {
+          setStep(idx, s.status === "complete" ? "done" : s.status === "error" ? "error" : "done");
+        }
       }
-    });
+
+      // Step 4: embedding indexing — POST /ingest/{doc_id}
+      setStep(4, "running");
+      const ingestResult = await ingestDocument(uploadResult.document_id);
+      setStep(4, "done", `${ingestResult.vectors_indexed} vectors indexed`);
+      setDone(true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      // Mark running step as error
+      setSteps((prev) =>
+        prev.map((s) => (s.state === "running" ? { ...s, state: "error" } : s))
+      );
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files[0];
-    if (f) startProcessing(f);
+    if (f) processFile(f);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) startProcessing(f);
+    if (f) processFile(f);
   };
 
   return (
     <div className="flex flex-col h-full">
       <PageHeader
         title="Document Upload"
-        subtitle="Ingest statutes, cases, contracts into the knowledge graph"
+        subtitle="Ingest statutes, cases, and contracts into the LexGraph Agent knowledge graph"
       />
 
       <div className="flex-1 overflow-y-auto bg-[#F5F6F8] p-6">
@@ -152,28 +188,40 @@ export default function UploadPage() {
               </div>
 
               <div className="flex flex-col gap-3">
-                {steps.map(({ label, state }) => (
+                {steps.map(({ label, state, detail }) => (
                   <div key={label} className="flex items-center gap-3">
                     <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
                       {state === "done" ? (
                         <span className="text-[#16A34A] text-sm">✓</span>
+                      ) : state === "error" ? (
+                        <span className="text-[#DC2626] text-sm">✕</span>
                       ) : state === "running" ? (
-                        <div
-                          className="w-4 h-4 rounded-full border-2 border-[#2D4FD6] border-t-transparent animate-spin"
-                        />
+                        <div className="w-4 h-4 rounded-full border-2 border-[#2D4FD6] border-t-transparent animate-spin" />
                       ) : (
                         <div className="w-2 h-2 rounded-full bg-[#D1D5DB]" />
                       )}
                     </div>
-                    <span
-                      className="text-[13px]"
-                      style={{
-                        color: state === "done" ? "#374151" : state === "running" ? "#2D4FD6" : "#9CA3AF",
-                        fontWeight: state === "running" ? 500 : 400,
-                      }}
-                    >
-                      {label}
-                    </span>
+                    <div className="flex-1">
+                      <span
+                        className="text-[13px]"
+                        style={{
+                          color:
+                            state === "done"
+                              ? "#374151"
+                              : state === "error"
+                              ? "#DC2626"
+                              : state === "running"
+                              ? "#2D4FD6"
+                              : "#9CA3AF",
+                          fontWeight: state === "running" ? 500 : 400,
+                        }}
+                      >
+                        {label}
+                      </span>
+                      {detail && (
+                        <span className="text-[10px] text-[#9CA3AF] ml-2">{detail}</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -184,6 +232,15 @@ export default function UploadPage() {
                   style={{ background: "#F0FDF4", border: "1px solid #BBF7D0" }}
                 >
                   Document ingested successfully. Nodes and edges created in Neo4j.
+                </div>
+              )}
+
+              {error && (
+                <div
+                  className="mt-4 p-3 rounded-lg text-[13px] font-medium text-[#DC2626]"
+                  style={{ background: "#FEF2F2", border: "1px solid #FECACA" }}
+                >
+                  {error}
                 </div>
               )}
             </div>

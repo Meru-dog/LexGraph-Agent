@@ -60,15 +60,19 @@ services:
       MINIO_SECRET_KEY: minioadmin_dev
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-pro}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_ACCESS_EXPIRE_MINUTES: ${JWT_ACCESS_EXPIRE_MINUTES:-60}
+      JWT_REFRESH_EXPIRE_DAYS: ${JWT_REFRESH_EXPIRE_DAYS:-7}
+      AUDIT_LOG_PATH: /app/data/audit.jsonl
     volumes:
       - ./backend:/app
-      - faiss_index:/app/faiss_index
+      - backend_data:/app/data
     depends_on:
       neo4j:
         condition: service_healthy
       minio:
         condition: service_healthy
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude '.venv/*'
 
   # ─── Next.js frontend ────────────────────────────────────────────────────────
   frontend:
@@ -93,4 +97,4 @@ volumes:
   neo4j_logs:
   neo4j_plugins:
   minio_data:
-  faiss_index:
+  backend_data:

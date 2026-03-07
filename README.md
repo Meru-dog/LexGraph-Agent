@@ -1,8 +1,8 @@
-# LexGraph AI
+# LexGraph Agent
 
 **Graph RAG legal research platform for Japanese and US dual-jurisdiction practice.**
 
-LexGraph AI combines a Neo4j knowledge graph, FAISS vector search, and a Gemini-powered LLM to help attorneys and paralegals perform due diligence, contract review, and legal research across JP and US law — all in a single platform with a human-in-the-loop review workflow.
+LexGraph Agent combines a Neo4j knowledge graph, FAISS vector search, and a Gemini-powered LLM to help attorneys and paralegals perform due diligence, contract review, and legal research across JP and US law — all in a single platform with a human-in-the-loop review workflow.
 
 ---
 
@@ -69,8 +69,8 @@ LexGraph AI combines a Neo4j knowledge graph, FAISS vector search, and a Gemini-
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-org/lexgraph-ai.git
-cd lexgraph-ai
+git clone https://github.com/Meru-dog/LexGraph-Agent
+cd LexGraph-Agent
 cp .env.example .env
 ```
 
@@ -108,8 +108,8 @@ python -m spacy download en_core_web_sm
 # Optional — Japanese NER (requires ~500 MB):
 pip install ja-ginza
 
-# Run
-uvicorn main:app --reload --port 8000
+# Run with auto-reload (watches only source dirs, not .venv)
+python main.py
 ```
 
 The API will be available at `http://localhost:8000`.
@@ -179,7 +179,7 @@ Services:
 ## Project Structure
 
 ```
-lexgraph-ai/
+LexGraph-Agent/
 ├── backend/
 │   ├── main.py                   # FastAPI app entry point
 │   ├── agents/

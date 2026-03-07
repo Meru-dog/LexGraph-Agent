@@ -32,6 +32,11 @@ export default function DDPromptPanel({
 
   return (
     <div className="w-[296px] flex-shrink-0 border-r border-[#E5E7EB] bg-white flex flex-col h-full overflow-y-auto">
+      {/* Panel header */}
+      <div className="px-5 pt-[18px] pb-[14px] border-b border-[#F3F4F6]">
+        <div className="text-[15px] font-semibold text-[#111827]">DD Agent</div>
+        <div className="text-[11px] text-[#9CA3AF] mt-0.5">Automated legal due diligence as counsel</div>
+      </div>
       <div className="p-5">
         {/* Prompt textarea */}
         <div className="mb-3">

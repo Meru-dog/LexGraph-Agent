@@ -66,7 +66,7 @@ export default function GraphPage() {
         </div>
 
         <p className="mt-8 text-[12px] text-[#9CA3AF]">
-          Phase 3 — Neo4j Bloom integration or D3.js force graph will be available here.
+          Neo4j Bloom integration or D3.js force graph coming soon. Connect your AuraDB instance.
         </p>
       </div>
     </div>

@@ -332,5 +332,5 @@ For a more precise response, please specify:
 2. The transaction type (M&A, investment, contract, litigation)
 3. The specific legal question or article reference
 
-*Powered by Graph RAG + LLaMA 3.1 Fine-tuned (JP/US adapters)*`;
+*Powered by LexGraph Agent — Graph RAG + Gemini 1.5 Pro (JP/US)*`;
 }

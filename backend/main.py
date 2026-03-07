@@ -62,7 +62,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://lexgraph.ai"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://lexgraph.ai"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,3 +80,17 @@ app.include_router(ws.router)
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Use reload_dirs instead of --reload-exclude to avoid infinite restart loops
+    # caused by uvicorn watching .venv package files (e.g. google protobuf / oauth2).
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_dirs=["api", "agents", "graph", "ingestion", "models", "tools"],
+    )

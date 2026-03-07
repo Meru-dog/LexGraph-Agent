@@ -25,7 +25,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LexGraph AI — JP/US Legal Research",
+  title: "LexGraph Agent — JP/US Legal Research",
   description: "Graph RAG legal research platform for Japanese and US dual-jurisdiction practice",
 };
 

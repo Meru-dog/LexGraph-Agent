@@ -34,10 +34,10 @@ export default function Sidebar() {
           className="text-[21px] text-[#111827] leading-tight"
           style={{ fontFamily: "var(--font-dm-serif)" }}
         >
-          LexGraph
+          LexGraph Agent
         </div>
         <div className="text-[9.5px] uppercase tracking-[1.5px] text-[#9CA3AF] mt-0.5 font-sans">
-          AI Legal Research
+          Legal AI Platform
         </div>
       </div>
 
@@ -105,11 +105,11 @@ export default function Sidebar() {
             Jurisdiction
           </div>
           <div className="text-[#6B7280] mt-0.5" style={{ fontFamily: "var(--font-ibm-plex-mono)" }}>
-            JP + US
+            🇯🇵 JP + 🇺🇸 US Active
           </div>
         </div>
         <div className="text-[10px] text-[#9CA3AF] mt-2 text-center">
-          Graph RAG · LLaMA 3.1
+          Graph RAG · Gemini 1.5 Pro
         </div>
       </div>
     </aside>

@@ -1,0 +1,24 @@
+{
+  "coliee": {
+    "benchmark": "COLIEE Task 4",
+    "jurisdiction": "JP",
+    "target": 0.7,
+    "score": null,
+    "status": "Dataset unavailable — run after COLIEE registration"
+  },
+  "lexglue": {
+    "benchmark": "LexGLUE",
+    "jurisdiction": "US",
+    "target": 0.75,
+    "macro_f1": null,
+    "per_task": {},
+    "status": "Dry run — model not loaded"
+  },
+  "internal": {
+    "benchmark": "Internal Contract Test Set",
+    "jurisdiction": "JP + US",
+    "target": 4.0,
+    "test_cases": 0,
+    "status": "Test directory not found — place contracts in tests/contracts/"
+  }
+}

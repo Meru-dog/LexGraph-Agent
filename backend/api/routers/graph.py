@@ -7,6 +7,118 @@ from tools.graph_search import graph_search
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 
+@router.get("/stats")
+async def graph_stats():
+    """Return live node/relationship counts from Neo4j."""
+    try:
+        from graph.neo4j_client import neo4j_client
+        if not neo4j_client._driver:
+            return {"connected": False, "nodes": 0, "relationships": 0, "by_label": {}}
+        with neo4j_client._driver.session() as session:
+            node_count = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
+            rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS c").single()["c"]
+            label_rows = session.run(
+                "CALL db.labels() YIELD label "
+                "CALL apoc.cypher.run('MATCH (n:' + label + ') RETURN count(n) AS c', {}) YIELD value "
+                "RETURN label, value.c AS c"
+            )
+            by_label = {row["label"]: row["c"] for row in label_rows}
+        return {"connected": True, "nodes": node_count, "relationships": rel_count, "by_label": by_label}
+    except Exception:
+        # apoc may not be available — fall back to simple counts
+        try:
+            from graph.neo4j_client import neo4j_client
+            with neo4j_client._driver.session() as session:
+                node_count = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
+                rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS c").single()["c"]
+            return {"connected": True, "nodes": node_count, "relationships": rel_count, "by_label": {}}
+        except Exception as e:
+            return {"connected": False, "nodes": 0, "relationships": 0, "by_label": {}, "error": str(e)}
+
+
+@router.get("/sample")
+async def sample_graph(limit: int = Query(default=60, ge=10, le=200)):
+    """Return a sample subgraph (nodes + relationships) for force-directed visualization."""
+    try:
+        from graph.neo4j_client import neo4j_client
+        if not neo4j_client._driver:
+            return _mock_graph()
+        with neo4j_client._driver.session() as session:
+            node_rows = list(session.run(
+                "MATCH (n) RETURN elementId(n) AS eid, labels(n) AS labels, properties(n) AS props LIMIT $limit",
+                {"limit": limit},
+            ))
+            nodes = []
+            eid_to_id: dict = {}
+            for row in node_rows:
+                props = dict(row["props"])
+                nid = str(props.get("node_id") or row["eid"])
+                props["_id"] = nid
+                props["_labels"] = list(row["labels"])
+                nodes.append(props)
+                eid_to_id[row["eid"]] = nid
+
+            eids = [row["eid"] for row in node_rows]
+            rel_rows = list(session.run(
+                """
+                MATCH (a)-[r]->(b)
+                WHERE elementId(a) IN $eids AND elementId(b) IN $eids
+                RETURN type(r) AS type,
+                       coalesce(a.node_id, elementId(a)) AS src,
+                       coalesce(b.node_id, elementId(b)) AS tgt
+                LIMIT 300
+                """,
+                {"eids": eids},
+            ))
+            rels = [{"type": r["type"], "source": str(r["src"]), "target": str(r["tgt"])} for r in rel_rows]
+        return {"nodes": nodes, "relationships": rels, "connected": True}
+    except Exception as e:
+        print(f"[graph/sample] {e}")
+        return _mock_graph()
+
+
+def _mock_graph() -> dict:
+    """Demo graph used when Neo4j is unavailable."""
+    nodes = [
+        {"_id": "jp_companies_act", "_labels": ["Statute"], "name": "会社法", "title": "Companies Act", "jurisdiction": "JP"},
+        {"_id": "jp_fiea", "_labels": ["Statute"], "name": "金商法", "title": "FIEA", "jurisdiction": "JP"},
+        {"_id": "jp_civil_code", "_labels": ["Statute"], "name": "民法", "title": "Civil Code", "jurisdiction": "JP"},
+        {"_id": "us_dgcl", "_labels": ["Statute"], "name": "DGCL", "title": "Delaware Corp Law", "jurisdiction": "US"},
+        {"_id": "us_sec_act", "_labels": ["Statute"], "name": "SEA 1934", "title": "Securities Exchange Act", "jurisdiction": "US"},
+        {"_id": "us_ucc", "_labels": ["Statute"], "name": "UCC Art.2", "title": "Uniform Commercial Code", "jurisdiction": "US"},
+        {"_id": "jp_corp_gov", "_labels": ["LegalConcept"], "name": "Corporate Gov.", "jurisdiction": "JP"},
+        {"_id": "us_fiduciary", "_labels": ["LegalConcept"], "name": "Fiduciary Duty", "jurisdiction": "US"},
+        {"_id": "jp_disclosure", "_labels": ["LegalConcept"], "name": "Disclosure (JP)", "jurisdiction": "JP"},
+        {"_id": "us_disclosure", "_labels": ["LegalConcept"], "name": "Disclosure (US)", "jurisdiction": "US"},
+        {"_id": "jp_art_330", "_labels": ["Provision"], "name": "Art.330", "title": "Director Obligations", "jurisdiction": "JP"},
+        {"_id": "jp_art_362", "_labels": ["Provision"], "name": "Art.362", "title": "Board Duties", "jurisdiction": "JP"},
+        {"_id": "us_rule_10b5", "_labels": ["Provision"], "name": "Rule 10b-5", "title": "Anti-Fraud Rule", "jurisdiction": "US"},
+        {"_id": "us_sec_16", "_labels": ["Provision"], "name": "§16", "title": "Insider Reporting", "jurisdiction": "US"},
+        {"_id": "corp_techcorp", "_labels": ["Entity"], "name": "TechCorp KK", "jurisdiction": "JP"},
+        {"_id": "corp_investco", "_labels": ["Entity"], "name": "InvestCo LLC", "jurisdiction": "US"},
+    ]
+    rels = [
+        {"source": "jp_art_330", "target": "jp_companies_act", "type": "PART_OF"},
+        {"source": "jp_art_362", "target": "jp_companies_act", "type": "PART_OF"},
+        {"source": "us_rule_10b5", "target": "us_sec_act", "type": "PART_OF"},
+        {"source": "us_sec_16", "target": "us_sec_act", "type": "PART_OF"},
+        {"source": "jp_art_330", "target": "jp_corp_gov", "type": "IMPLEMENTS"},
+        {"source": "jp_art_362", "target": "jp_corp_gov", "type": "IMPLEMENTS"},
+        {"source": "us_rule_10b5", "target": "us_fiduciary", "type": "IMPLEMENTS"},
+        {"source": "us_fiduciary", "target": "us_dgcl", "type": "GOVERNED_BY"},
+        {"source": "jp_corp_gov", "target": "us_fiduciary", "type": "ANALOGOUS_TO"},
+        {"source": "jp_disclosure", "target": "jp_fiea", "type": "GOVERNED_BY"},
+        {"source": "us_disclosure", "target": "us_sec_act", "type": "GOVERNED_BY"},
+        {"source": "jp_disclosure", "target": "us_disclosure", "type": "ANALOGOUS_TO"},
+        {"source": "corp_techcorp", "target": "jp_companies_act", "type": "GOVERNED_BY"},
+        {"source": "corp_investco", "target": "us_dgcl", "type": "GOVERNED_BY"},
+        {"source": "jp_civil_code", "target": "jp_companies_act", "type": "CITES"},
+        {"source": "us_ucc", "target": "us_sec_act", "type": "CITES"},
+        {"source": "corp_techcorp", "target": "corp_investco", "type": "RELATED_TO"},
+    ]
+    return {"nodes": nodes, "relationships": rels, "connected": False}
+
+
 @router.get("/search")
 async def search_graph(
     q: str = Query(..., description="Search query"),

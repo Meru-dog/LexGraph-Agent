@@ -42,9 +42,10 @@ export function useContractReview() {
           const data = await getContractReviewStatus(taskId);
           const apiStatus: string = data.status ?? "running";
 
+          // Backend returns the full task dict directly (no nested .result key)
           setState((prev) => ({
             ...prev,
-            result: data.result ?? prev.result,
+            result: data,
             status: apiStatus === "complete" ? "complete" : apiStatus === "error" ? "error" : "running",
           }));
 

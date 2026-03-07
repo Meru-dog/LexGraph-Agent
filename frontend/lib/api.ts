@@ -163,16 +163,34 @@ export async function listReviewTasks() {
   return res.json() as Promise<unknown[]>;
 }
 
+async function _downloadBlob(url: string, filename: string): Promise<void> {
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let detail = `Export failed: ${res.status}`;
+    try { detail = JSON.parse(text)?.detail ?? detail; } catch { /* use status */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 200);
+}
+
 export function downloadDDReport(taskId: string): void {
-  const token = localStorage.getItem("lexgraph_access_token");
-  const url = `${BASE_URL}/agent/dd/${taskId}/export${token ? `?token=${token}` : ""}`;
-  window.open(url, "_blank");
+  _downloadBlob(`${BASE_URL}/agent/dd/${taskId}/export`, `dd_report_${taskId.slice(0, 8)}.pdf`)
+    .catch((e) => alert(`PDF export failed: ${e.message}`));
 }
 
 export function downloadRedlinedDocx(taskId: string): void {
-  const token = localStorage.getItem("lexgraph_access_token");
-  const url = `${BASE_URL}/agent/review/${taskId}/export${token ? `?token=${token}` : ""}`;
-  window.open(url, "_blank");
+  _downloadBlob(`${BASE_URL}/agent/review/${taskId}/export`, `redlined_${taskId.slice(0, 8)}.docx`)
+    .catch((e) => alert(`DOCX export failed: ${e.message}`));
 }
 
 // ─── Graph ────────────────────────────────────────────────────────────────────

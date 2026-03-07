@@ -5,7 +5,7 @@ from typing import Optional, AsyncGenerator
 
 LLAMA_ENDPOINT = os.getenv("LLAMA_ENDPOINT", "http://localhost:8080")
 USE_VLLM = os.getenv("USE_VLLM", "false").lower() == "true"
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 class LlamaClient:

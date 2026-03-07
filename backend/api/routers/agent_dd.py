@@ -62,14 +62,10 @@ def _run_dd_agent(task_id: str, request: DDRequest) -> None:
             _tasks[task_id]["current_step"] = _get_step_number(node_name)
             _tasks[task_id]["step_label"] = node_name.replace("_", " ").title()
 
-            if node_name == "human_checkpoint":
-                _tasks[task_id]["status"] = "awaiting_review"
-                # Notify connected WebSocket clients
-                _notify_ws(task_id, "awaiting_review")
-                return
-
+        state = dd_graph.get_state(config)
+        _tasks[task_id]["report"] = state.values.get("dd_report")
         _tasks[task_id]["status"] = "complete"
-        _tasks[task_id]["report"] = _tasks[task_id].get("partial_report")
+        _notify_ws(task_id, "complete")
 
     except Exception as e:
         _tasks[task_id]["status"] = "error"

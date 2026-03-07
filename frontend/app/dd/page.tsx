@@ -1,21 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import DDPromptPanel from "@/components/dd/DDPromptPanel";
 import DDReportHeader from "@/components/dd/DDReportHeader";
 import DDReportSection from "@/components/dd/DDReportSection";
 import ReviewPanel from "@/components/dd/ReviewPanel";
-import { useDDAgent } from "@/hooks/useDDAgent";
+import { useDDContext } from "@/context/DDContext";
 import { downloadDDReport } from "@/lib/api";
 import type { DDReport } from "@/lib/types";
 
 export default function DDAgentPage() {
-  const [prompt, setPrompt] = useState(
-    "Our company wants to invest ¥2B in TechCorp KK. Please conduct full legal due diligence as our lawyer."
-  );
-  const [jurisdiction, setJurisdiction] = useState("JP+US");
-  const { status, currentStep, report, error, taskId, runAgent, approveReport } = useDDAgent();
+  const { status, currentStep, report, error, taskId, runAgent, approveReport,
+          prompt, jurisdiction, setPrompt, setJurisdiction } = useDDContext();
 
   const handleRun = () => {
     if (!prompt.trim() || status === "running") return;
@@ -48,7 +44,7 @@ export default function DDAgentPage() {
       <div className="flex-1 overflow-y-auto bg-[#F5F6F8]">
         <PageHeader
           title="Due Diligence Agent"
-          subtitle="LangGraph · 8-step CFI format · JP/US jurisdiction · Gemini 1.5 Pro"
+          subtitle="LangGraph · 8-step CFI format · JP/US jurisdiction"
           right={
             status === "complete" && ddReport ? (
               <button

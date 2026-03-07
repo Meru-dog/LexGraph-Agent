@@ -1,6 +1,12 @@
 """LexGraph AI — FastAPI application entry point."""
 
 import os
+from pathlib import Path
+
+# Load .env before anything else so GEMINI_API_KEY and other vars are available.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 # Prevent tokenizer multiprocessing workers from deadlocking inside asyncio.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -83,14 +89,23 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    import pathlib
     import uvicorn
 
-    # Use reload_dirs instead of --reload-exclude to avoid infinite restart loops
-    # caused by uvicorn watching .venv package files (e.g. google protobuf / oauth2).
+    # google-generativeai touches hundreds of protobuf files on import, triggering
+    # watchfiles when reload watches the full CWD. Fix: pass absolute paths so
+    # watchfiles watches ONLY the source subdirs, never .venv.
+    _here = pathlib.Path(__file__).parent
+    _src_dirs = [
+        str(_here / d)
+        for d in ("api", "agents", "graph", "ingestion", "models", "tools")
+        if (_here / d).is_dir()
+    ]
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
-        reload_dirs=["api", "agents", "graph", "ingestion", "models", "tools"],
+        reload_dirs=_src_dirs,
     )

@@ -3,6 +3,9 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ChatProvider } from "@/context/ChatContext";
+import { DDProvider } from "@/context/DDContext";
+import { ContractReviewProvider } from "@/context/ContractReviewContext";
 import Sidebar from "./Sidebar";
 
 function GuardedLayout({ children }: { children: React.ReactNode }) {
@@ -40,7 +43,13 @@ function GuardedLayout({ children }: { children: React.ReactNode }) {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <GuardedLayout>{children}</GuardedLayout>
+      <ChatProvider>
+        <DDProvider>
+          <ContractReviewProvider>
+            <GuardedLayout>{children}</GuardedLayout>
+          </ContractReviewProvider>
+        </DDProvider>
+      </ChatProvider>
     </AuthProvider>
   );
 }

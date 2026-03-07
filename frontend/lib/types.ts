@@ -22,7 +22,7 @@ export type Jurisdiction = "JP" | "US" | "JP+US" | "auto";
 
 // ─── DD Agent ─────────────────────────────────────────────────────────────────
 
-export type RiskLevel = "critical" | "high" | "medium" | "ok" | "warn";
+export type RiskLevel = "critical" | "high" | "medium" | "low" | "ok" | "warn";
 
 export interface DDFinding {
   status: RiskLevel;

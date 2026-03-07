@@ -52,9 +52,6 @@ def _run_review_agent(task_id: str, raw_contract: str, request: ReviewRequest) -
         for step_output in review_graph.stream(initial_state, config=config):
             node_name = list(step_output.keys())[0]
             _tasks[task_id]["current_node"] = node_name
-            if node_name == "human_checkpoint":
-                _tasks[task_id]["status"] = "awaiting_review"
-                return
 
         state = review_graph.get_state(config)
         _tasks[task_id]["status"] = "complete"
@@ -82,11 +79,12 @@ async def start_review(
 ):
     task_id = str(uuid.uuid4())
     # Fetch raw contract text from in-memory document store (populated by /upload)
-    from api.routers.upload import get_document_bytes
+    from api.routers.upload import get_document_bytes, get_document_filename
     doc_bytes = get_document_bytes(request.document_id)
     if doc_bytes:
         from ingestion.pipeline import _extract_text
-        raw_contract = _extract_text(doc_bytes, request.document_id)
+        doc_filename = get_document_filename(request.document_id)
+        raw_contract = _extract_text(doc_bytes, doc_filename)
     else:
         raw_contract = f"[Contract document {request.document_id} — not found in store]"
     _tasks[task_id] = {

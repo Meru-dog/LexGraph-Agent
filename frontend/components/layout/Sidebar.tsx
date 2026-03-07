@@ -109,7 +109,7 @@ export default function Sidebar() {
           </div>
         </div>
         <div className="text-[10px] text-[#9CA3AF] mt-2 text-center">
-          Graph RAG · Gemini 1.5 Pro
+          Graph RAG · Legal AI
         </div>
       </div>
     </aside>

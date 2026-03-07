@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 @lru_cache(maxsize=2)
@@ -20,5 +20,5 @@ def get_llm(system_prompt: str = "You are a legal expert in JP/US law."):
         google_api_key=os.environ["GEMINI_API_KEY"],
         temperature=0.1,
         max_output_tokens=2048,
-        convert_system_message_to_human=True,
+        request_options={"timeout": 30},
     )

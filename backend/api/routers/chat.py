@@ -15,7 +15,7 @@ from tools.vector_search import vector_search
 
 router = APIRouter(tags=["chat"])
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 JP_SYSTEM = (
     "You are a bilingual legal expert specializing in Japanese corporate and securities law "
@@ -39,8 +39,6 @@ class ChatRequest(BaseModel):
 
 async def _gemini_stream(query: str, jurisdiction: str, history: list[dict]) -> AsyncGenerator[str, None]:
     """Stream Gemini response tokens as SSE events."""
-    import google.generativeai as genai
-
     detected_jur = jurisdiction if jurisdiction != "auto" else jurisdiction_router(query)
     system = JP_SYSTEM if detected_jur == "JP" else US_SYSTEM
 
@@ -65,6 +63,7 @@ async def _gemini_stream(query: str, jurisdiction: str, history: list[dict]) -> 
         chat_history.append({"role": role, "parts": [msg["content"]]})
 
     try:
+        import google.generativeai as genai  # noqa: PLC0415
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
         model = genai.GenerativeModel(
             model_name=GEMINI_MODEL,

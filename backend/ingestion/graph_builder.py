@@ -13,19 +13,24 @@ def build_graph_nodes(
     """Write Document node, Chunk nodes (with CHUNK_OF edges), and Entity nodes to Neo4j.
 
     Falls back gracefully if neo4j-driver is not connected.
+    Returns a 'neo4j_stored' bool so callers can distinguish real writes from stubs.
     """
     try:
         from graph.neo4j_client import neo4j_client
         if not neo4j_client._driver:
-            raise RuntimeError("not connected")
-        return _write_to_neo4j(neo4j_client, chunks, entities, doc_id, document_type, filename)
+            raise RuntimeError("Neo4j not connected")
+        result = _write_to_neo4j(neo4j_client, chunks, entities, doc_id, document_type, filename)
+        result["neo4j_stored"] = True
+        return result
     except Exception as e:
         print(f"[graph_builder] Neo4j write skipped ({e})")
         return {
-            "nodes_created": len(chunks) + len(entities),
+            "nodes_created": 0,
             "chunk_nodes": len(chunks),
             "entity_nodes": len(entities),
             "doc_id": doc_id,
+            "neo4j_stored": False,
+            "neo4j_skip_reason": str(e),
         }
 
 

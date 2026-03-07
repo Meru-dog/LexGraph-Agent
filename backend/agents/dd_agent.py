@@ -169,19 +169,8 @@ def risk_synthesizer(state: DDState) -> dict:
 
 
 def human_checkpoint(state: DDState) -> dict:
-    """LangGraph interrupt — pause for attorney review."""
-    from langgraph.types import interrupt
-    review = interrupt(
-        {
-            "reason": "Attorney review required before report generation.",
-            "risk_summary": {k: len(v) for k, v in state["risk_matrix"].items()},
-        }
-    )
-    return {
-        "attorney_notes": review.get("notes", ""),
-        "approved": review.get("approved", True),
-        "reinvestigation_targets": review.get("targets", []),
-    }
+    """Pass-through — attorney review submitted via /agent/dd/{id}/review after report delivery."""
+    return {"approved": True}
 
 
 def report_generator(state: DDState) -> dict:
@@ -271,7 +260,7 @@ def build_dd_graph() -> StateGraph:
     builder.add_edge("report_generator", END)
 
     checkpointer = MemorySaver()
-    return builder.compile(checkpointer=checkpointer, interrupt_before=["human_checkpoint"])
+    return builder.compile(checkpointer=checkpointer)
 
 
 dd_graph = build_dd_graph()

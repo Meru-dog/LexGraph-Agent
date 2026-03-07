@@ -37,6 +37,7 @@ export default function UploadPage() {
   const [steps, setSteps] = useState<ProcessStep[]>([]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ neo4j_stored?: boolean } | null>(null);
 
   const setStep = (index: number, state: StepState, detail?: string) => {
     setSteps((prev) => {
@@ -62,6 +63,7 @@ export default function UploadPage() {
     setFile(f);
     setDone(false);
     setError(null);
+    setUploadResult(null);
     setSteps(STEP_LABELS.map((label) => ({ label, state: "pending" })));
 
     try {
@@ -69,6 +71,7 @@ export default function UploadPage() {
       setStep(0, "running");
 
       const uploadResult = await uploadDocument(f, docType.toLowerCase().replace(" ", "_"));
+      setUploadResult(uploadResult);
 
       // Mark steps 0–3 done based on backend response
       const processingSteps: { step: string; status: string }[] = uploadResult.processing_steps ?? [];
@@ -83,14 +86,20 @@ export default function UploadPage() {
       for (const s of processingSteps) {
         const idx = stepMap[s.step];
         if (idx !== undefined) {
-          setStep(idx, s.status === "complete" ? "done" : s.status === "error" ? "error" : "done");
+          const state: StepState = s.status === "complete" ? "done" : s.status === "skipped" ? "done" : "done";
+          const detail = s.status === "skipped" ? `skipped — ${(s as { note?: string }).note ?? "Neo4j not connected"}` : undefined;
+          setStep(idx, state, detail);
         }
       }
 
       // Step 4: embedding indexing — POST /ingest/{doc_id}
       setStep(4, "running");
       const ingestResult = await ingestDocument(uploadResult.document_id);
-      setStep(4, "done", `${ingestResult.vectors_indexed} vectors indexed`);
+      if (ingestResult.embed_warning) {
+        setStep(4, "done", `Skipped (${ingestResult.embed_warning.slice(0, 60)})`);
+      } else {
+        setStep(4, "done", `${ingestResult.vectors_indexed} vectors indexed`);
+      }
       setDone(true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -228,10 +237,16 @@ export default function UploadPage() {
 
               {done && (
                 <div
-                  className="mt-4 p-3 rounded-lg text-[13px] font-medium text-[#15803D]"
-                  style={{ background: "#F0FDF4", border: "1px solid #BBF7D0" }}
+                  className="mt-4 p-3 rounded-lg text-[12px] font-medium"
+                  style={{
+                    background: uploadResult?.neo4j_stored ? "#F0FDF4" : "#FFFBEB",
+                    border: `1px solid ${uploadResult?.neo4j_stored ? "#BBF7D0" : "#FDE68A"}`,
+                    color: uploadResult?.neo4j_stored ? "#15803D" : "#92400E",
+                  }}
                 >
-                  Document ingested successfully. Nodes and edges created in Neo4j.
+                  {uploadResult?.neo4j_stored
+                    ? "Document ingested. Nodes and chunks stored in Neo4j + FAISS."
+                    : "Document stored. FAISS vectors indexed. Neo4j not connected — graph nodes skipped."}
                 </div>
               )}
 

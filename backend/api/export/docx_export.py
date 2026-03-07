@@ -83,7 +83,8 @@ def _write_diff_paragraphs(doc: Document, original: str, reviewed: str) -> None:
         if op == "equal":
             for line in orig_lines[i1:i2]:
                 p = doc.add_paragraph(line)
-                p.runs[0].font.size = Pt(9) if p.runs else None
+                if p.runs:
+                    p.runs[0].font.size = Pt(9)
         elif op in ("replace", "delete"):
             for line in orig_lines[i1:i2]:
                 p = doc.add_paragraph()

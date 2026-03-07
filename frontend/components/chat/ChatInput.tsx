@@ -11,6 +11,7 @@ interface Props {
 
 export default function ChatInput({ value, onChange, onSubmit, disabled }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
 
   // Auto-resize textarea (1–6 rows)
   useEffect(() => {
@@ -24,7 +25,8 @@ export default function ChatInput({ value, onChange, onSubmit, disabled }: Props
   }, [value]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Do not submit while IME composition is active (Japanese/Chinese/Korean input)
+    if (e.key === "Enter" && !e.shiftKey && !composingRef.current) {
       e.preventDefault();
       if (value.trim() && !disabled) onSubmit();
     }
@@ -41,6 +43,8 @@ export default function ChatInput({ value, onChange, onSubmit, disabled }: Props
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={() => { composingRef.current = false; }}
           disabled={disabled}
           placeholder="Ask a legal question (JP / US)... Press Enter to send, Shift+Enter for newline"
           rows={1}

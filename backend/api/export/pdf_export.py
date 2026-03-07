@@ -48,11 +48,11 @@ def build_dd_pdf(task: dict) -> bytes:
         leading=14, spaceAfter=4,
     )
     risk_colors = {
-        "critical": colors.HexColor("#DC2626"),
-        "high":     colors.HexColor("#EA580C"),
-        "medium":   colors.HexColor("#D97706"),
-        "ok":       colors.HexColor("#16A34A"),
-        "low":      colors.HexColor("#6B7280"),
+        "critical": "#DC2626",
+        "high":     "#EA580C",
+        "medium":   "#D97706",
+        "ok":       "#16A34A",
+        "low":      "#6B7280",
     }
 
     report = task.get("report") or {}
@@ -86,9 +86,9 @@ def build_dd_pdf(task: dict) -> bytes:
         ("FONTSIZE",   (0, 0), (-1, -1), 9),
         ("GRID",       (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
         ("ALIGN",      (1, 0), (1, -1), "CENTER"),
-        ("TEXTCOLOR",  (0, 1), (0, 1), risk_colors["critical"]),
-        ("TEXTCOLOR",  (0, 2), (0, 2), risk_colors["high"]),
-        ("TEXTCOLOR",  (0, 3), (0, 3), risk_colors["medium"]),
+        ("TEXTCOLOR",  (0, 1), (0, 1), colors.HexColor(risk_colors["critical"])),
+        ("TEXTCOLOR",  (0, 2), (0, 2), colors.HexColor(risk_colors["high"])),
+        ("TEXTCOLOR",  (0, 3), (0, 3), colors.HexColor(risk_colors["medium"])),
     ]))
     elements.append(risk_table)
     elements.append(Spacer(1, 6 * mm))
@@ -117,7 +117,7 @@ def build_dd_pdf(task: dict) -> bytes:
         for item in sec.get("items", []):
             status = item.get("status", "ok")
             color_hex = risk_colors.get(status, risk_colors["ok"])
-            badge = f'<font color="#{color_hex.hexval()}">[{status.upper()}]</font>'
+            badge = f'<font color="{color_hex}">[{status.upper()}]</font>'
             text = item.get("text", "")
             elements.append(Paragraph(f"{badge} {text}", body_style))
         elements.append(Spacer(1, 3 * mm))

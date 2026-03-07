@@ -91,28 +91,26 @@ def statute_checker(state: ContractReviewState) -> dict:
 
 
 def human_checkpoint(state: ContractReviewState) -> dict:
-    """LangGraph interrupt — attorney reviews high-risk clauses."""
-    from langgraph.types import interrupt
-    high_risk = [r for r in state["clause_reviews"] if r["risk_level"] in ("critical", "high")]
-    review = interrupt(
-        {
-            "reason": "Attorney review required for high-risk clauses.",
-            "high_risk_clauses": [r["clause_id"] for r in high_risk],
-        }
-    )
-    return {
-        "attorney_redlines": review.get("redlines", {}),
-        "approved_clauses": review.get("approved", []),
-    }
+    """Pass-through — attorney review via the /approve endpoint after completion."""
+    return {}
 
 
 def redline_generator(state: ContractReviewState) -> dict:
-    """Build the final redlined contract and review report."""
+    """Build the final redlined contract and review report.
+
+    Priority: attorney manual redlines override AI suggestions.
+    For clauses without an attorney redline, the AI redline_suggestion is applied.
+    """
     redlined = state["raw_contract"]
-    for clause_id, attorney_text in state.get("attorney_redlines", {}).items():
-        clause = next((c for c in state["clauses"] if c["id"] == clause_id), None)
-        if clause:
-            redlined = redlined.replace(clause["text"], attorney_text)
+    attorney_redlines = state.get("attorney_redlines", {}) or {}
+
+    for review in state["clause_reviews"]:
+        clause = next((c for c in state["clauses"] if c["id"] == review["clause_id"]), None)
+        if not clause:
+            continue
+        replacement = attorney_redlines.get(review["clause_id"]) or review.get("redline_suggestion", "")
+        if replacement and replacement != clause["text"]:
+            redlined = redlined.replace(clause["text"], replacement)
 
     report = report_formatter(
         findings=[
@@ -210,7 +208,7 @@ def build_review_graph() -> StateGraph:
     builder.add_edge("redline_generator", END)
 
     checkpointer = MemorySaver()
-    return builder.compile(checkpointer=checkpointer, interrupt_before=["human_checkpoint"])
+    return builder.compile(checkpointer=checkpointer)
 
 
 review_graph = build_review_graph()

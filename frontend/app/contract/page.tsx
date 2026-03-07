@@ -4,14 +4,14 @@ import PageHeader from "@/components/layout/PageHeader";
 import UploadZone from "@/components/contract/UploadZone";
 import ClauseAnnotationCard from "@/components/contract/ClauseAnnotationCard";
 import DiffViewer from "@/components/contract/DiffViewer";
-import { useContractReview } from "@/hooks/useContractReview";
+import { useContractReviewContext } from "@/context/ContractReviewContext";
 import { downloadRedlinedDocx } from "@/lib/api";
 import { MOCK_DIFF, MOCK_CLAUSE_ANNOTATIONS } from "@/lib/mockData";
 import { diffLines, countDiffStats } from "@/lib/diff";
 import type { DiffLine, ClauseAnnotation } from "@/lib/types";
 
 export default function ContractReviewPage() {
-  const { status, result, error, taskId, reviewFile, reset } = useContractReview();
+  const { status, result, error, taskId, reviewFile, reset } = useContractReviewContext();
 
   const handleFile = (file: File) => {
     reviewFile(file, {
@@ -158,7 +158,7 @@ export default function ContractReviewPage() {
               </p>
             </div>
           ) : (
-            <DiffViewer diff={diff} filename="contract.pdf" />
+            <DiffViewer diff={diff} filename="contract.pdf" clauses={clauses} />
           )}
         </div>
       </div>

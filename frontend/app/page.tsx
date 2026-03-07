@@ -5,7 +5,7 @@ import ChatMessage from "@/components/chat/ChatMessage";
 import TypingIndicator from "@/components/chat/TypingIndicator";
 import ChatInput from "@/components/chat/ChatInput";
 import PageHeader from "@/components/layout/PageHeader";
-import { useChat } from "@/hooks/useChat";
+import { useChatContext } from "@/context/ChatContext";
 
 const TOPIC_CHIPS = [
   { label: "Corporate Law", prompt: "Explain Corporate Law implications for " },
@@ -16,16 +16,16 @@ const TOPIC_CHIPS = [
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
-  const [jurisdiction, setJurisdiction] = useState<"JP" | "US" | "JP+US">("JP");
-  const { messages, streaming, error, sendMessage } = useChat({ jurisdiction });
+  const { messages, streaming, error, jurisdiction, setJurisdiction, sendMessage } =
+    useChatContext();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streaming]);
+  }, [messages]);
 
   const handleSubmit = () => {
-    if (!input.trim() || streaming) return;
+    if (!input.trim()) return;
     sendMessage(input.trim());
     setInput("");
   };
@@ -34,10 +34,9 @@ export default function ChatPage() {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Legal Research Chat"
-        subtitle="Graph RAG · JP/US Law · Gemini 1.5 Pro"
+        subtitle="Graph RAG · JP/US Law"
         right={
           <div className="flex gap-1.5 flex-wrap items-center">
-            {/* Jurisdiction toggle */}
             <div className="flex rounded-full overflow-hidden border border-[#E0E4FA] text-[11px] mr-2">
               {(["JP", "US", "JP+US"] as const).map((j) => (
                 <button
@@ -88,17 +87,18 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Input area */}
+      {/* Input area — never disabled, queues if AI is streaming */}
       <div className="bg-white border-t border-[#E5E7EB]">
         <div className="max-w-[740px] mx-auto pt-4">
           <ChatInput
             value={input}
             onChange={setInput}
             onSubmit={handleSubmit}
-            disabled={streaming}
+            disabled={false}
           />
           <p className="text-center text-[11px] text-[#D1D5DB] pb-3">
-            LexGraph Agent · JP/US Dual-Jurisdiction · Graph RAG + Gemini 1.5 Pro
+            LexGraph Agent · JP/US Dual-Jurisdiction · Graph RAG
+            {streaming && " · Thinking…"}
           </p>
         </div>
       </div>

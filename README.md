@@ -251,3 +251,4 @@ On first startup, the backend seeds the Neo4j graph with:
 ## License
 
 MIT
+# LexGraph-Agent

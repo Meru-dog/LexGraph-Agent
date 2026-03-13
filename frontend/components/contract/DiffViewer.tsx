@@ -14,7 +14,7 @@ interface Props {
 
 interface NumberedLine {
   line: DiffLineType;
-  lineNo?: number; // original line number (undefined for pure additions)
+  lineNo?: number;
 }
 
 interface Block {
@@ -23,7 +23,6 @@ interface Block {
   blockIndex: number;
 }
 
-// Assign original-file line numbers to each diff line.
 function numberLines(diff: DiffLineType[]): NumberedLine[] {
   let n = 0;
   return diff.map((line) => {
@@ -50,14 +49,47 @@ const RISK_COLOR: Record<string, string> = {
   critical: "#DC2626", high: "#EA580C", medium: "#D97706", low: "#6B7280", ok: "#16A34A",
 };
 
+const RISK_ORDER: Record<string, number> = {
+  critical: 4, high: 3, medium: 2, low: 1, ok: 0,
+};
+
+/**
+ * Match a changed diff block to its specific ClauseAnnotation.
+ *
+ * Priority:
+ *   1. Exact snippet match: removed lines contain the clause's original text snippet
+ *   2. Keyword match: block text contains clauseRef or title words
+ *   3. Fallback: highest-risk unmatched clause
+ */
 function matchClause(block: Block, clauses: ClauseAnnotation[]): ClauseAnnotation | null {
   if (!clauses.length) return null;
-  const text = block.numbered.map((n) => n.line.text).join(" ").toLowerCase();
+
+  // Collect removed text (original) and added text (AI rewrite) from this block
+  const removedText = block.numbered
+    .filter((n) => n.line.type === "removed")
+    .map((n) => n.line.text)
+    .join(" ")
+    .toLowerCase();
+
+  const allText = block.numbered.map((n) => n.line.text).join(" ").toLowerCase();
+
+  // 1. Snippet match — most specific
   for (const c of clauses) {
-    if (text.includes(c.clauseRef.toLowerCase()) || text.includes(c.title.toLowerCase())) return c;
+    if (c.textSnippet) {
+      const snippet = c.textSnippet.toLowerCase().slice(0, 60).trim();
+      if (snippet && removedText.includes(snippet)) return c;
+    }
   }
-  const order: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, ok: 0 };
-  return [...clauses].sort((a, b) => (order[b.risk] ?? 0) - (order[a.risk] ?? 0))[0] ?? null;
+
+  // 2. Title/ref keyword match
+  for (const c of clauses) {
+    const words = c.title.toLowerCase().split(/[\s_-]+/).filter((w) => w.length > 3);
+    if (words.some((w) => allText.includes(w))) return c;
+    if (allText.includes(c.clauseRef.toLowerCase())) return c;
+  }
+
+  // 3. Fallback: highest-risk clause
+  return [...clauses].sort((a, b) => (RISK_ORDER[b.risk] ?? 0) - (RISK_ORDER[a.risk] ?? 0))[0] ?? null;
 }
 
 function DiffRow({ item }: { item: NumberedLine }) {
@@ -98,15 +130,21 @@ function DiffRow({ item }: { item: NumberedLine }) {
   );
 }
 
-function TooltipCard({ clause, x, y }: { clause: ClauseAnnotation; x: number; y: number }) {
+interface TooltipProps {
+  clause: ClauseAnnotation;
+  x: number;
+  y: number;
+}
+
+function TooltipCard({ clause, x, y }: TooltipProps) {
   const color = RISK_COLOR[clause.risk] ?? "#6B7280";
-  const safeX = typeof window !== "undefined" ? Math.min(x + 14, window.innerWidth - 320) : x + 14;
+  const safeX = typeof window !== "undefined" ? Math.min(x + 14, window.innerWidth - 340) : x + 14;
   return (
     <div
-      className="fixed z-50 rounded-lg shadow-2xl p-3 max-w-[300px] pointer-events-none"
+      className="fixed z-50 rounded-lg shadow-2xl p-3 max-w-[320px] pointer-events-none"
       style={{ left: safeX, top: y - 8, background: "#1c2128", border: `1px solid ${color}55` }}
     >
-      <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex items-center gap-2 mb-2">
         <span
           className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase"
           style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}
@@ -117,6 +155,18 @@ function TooltipCard({ clause, x, y }: { clause: ClauseAnnotation; x: number; y:
           {clause.clauseRef}
         </span>
       </div>
+
+      {/* Specific redline reason — the "why" for this change */}
+      {clause.reason && (
+        <div
+          className="text-[11px] leading-snug mb-1.5 pb-1.5"
+          style={{ color: "#aff5b4", borderBottom: `1px solid ${color}22` }}
+        >
+          {clause.reason}
+        </div>
+      )}
+
+      {/* Issues list */}
       {clause.notes && (
         <div className="text-[10px] leading-relaxed" style={{ color: "#8b949e" }}>
           {clause.notes.split(";").map((n, i) => (
@@ -162,6 +212,11 @@ export default function DiffViewer({ diff, filename, clauses = [] }: Props) {
         </span>
         {added === 0 && removed === 0 && (
           <span className="text-[11px]" style={{ color: "#484f58" }}>No changes detected</span>
+        )}
+        {clauses.length > 0 && (
+          <span className="text-[10px] ml-auto" style={{ color: "#484f58" }}>
+            Hover changed lines for AI analysis
+          </span>
         )}
       </div>
 

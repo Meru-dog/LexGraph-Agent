@@ -1,3 +1,7 @@
+// ─── LLM Model ────────────────────────────────────────────────────────────────
+
+export type LLMModel = "gemini" | "llama" | "fine_tuned";
+
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
 export type Role = "user" | "assistant";
@@ -73,7 +77,9 @@ export interface ClauseAnnotation {
   clauseRef: string;
   title: string;
   risk: RiskLevel;
-  notes: string;
+  notes: string;       // semicolon-separated issues
+  reason?: string;     // one-sentence reason for the redline change
+  textSnippet?: string; // first ~120 chars of original clause text (for diff matching)
 }
 
 export interface ContractReviewResult {

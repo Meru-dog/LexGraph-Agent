@@ -100,6 +100,7 @@ export async function startDDAgent(payload: {
   jurisdiction: string;
   document_ids: string[];
   transaction_type: string;
+  model_name?: string;
 }) {
   const res = await fetch(`${BASE_URL}/agent/dd`, {
     method: "POST",
@@ -108,6 +109,12 @@ export async function startDDAgent(payload: {
   });
   if (!res.ok) throw new Error(`DD Agent start failed: ${res.status}`);
   return res.json() as Promise<{ task_id: string; status: string; estimated_seconds: number }>;
+}
+
+export async function getAvailableModels(): Promise<{ id: string; name: string; type: string; available: boolean }[]> {
+  const res = await fetch(`${BASE_URL}/agent/dd/models`, { headers: authHeaders() });
+  if (!res.ok) return [{ id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", available: true }];
+  return res.json();
 }
 
 export async function getDDAgentStatus(taskId: string) {

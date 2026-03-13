@@ -22,17 +22,22 @@ const NODE_TYPES = ["Statute", "Case", "Provision", "LegalConcept", "Entity", "R
 interface RawNode {
   _id: string;
   _labels: string[];
+  _display_label?: string;
   name?: string;
   title?: string;
   node_id?: string;
   jurisdiction?: string;
+  filename?: string;
+  spacy_label?: string;
 }
 interface RawEdge { source: string; target: string; type: string; }
 interface GraphData { nodes: RawNode[]; relationships: RawEdge[]; connected: boolean; }
 interface SimNode extends RawNode { x: number; y: number; vx: number; vy: number; r: number; }
 
 function nodeLabel(n: RawNode): string {
-  return (n.name || n.title || n.node_id || n._id).slice(0, 20);
+  // Use backend-provided display label when available (never shows raw text)
+  const label = n._display_label || n.name || n.title || n.node_id || n._id;
+  return label.slice(0, 22);
 }
 function primaryLabel(n: RawNode): string { return n._labels[0] ?? "Node"; }
 function nodeColor(n: RawNode) { return LABEL_COLOR[primaryLabel(n)] ?? DEFAULT_COLOR; }
@@ -302,6 +307,9 @@ export default function GraphPage() {
                 </div>
                 {selectedNode.title && selectedNode.title !== nodeLabel(selectedNode) && (
                   <div className="text-[10px] text-[#6B7280] mt-1 leading-tight">{selectedNode.title}</div>
+                )}
+                {selectedNode.filename && (
+                  <div className="text-[10px] text-[#6B7280] mt-1 leading-tight">{selectedNode.filename}</div>
                 )}
               </div>
               <div className="text-[9px] text-[#9CA3AF] mt-2 font-mono break-all">{selectedNode._id}</div>

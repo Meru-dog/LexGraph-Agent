@@ -32,7 +32,7 @@ export default function ContractReviewPage() {
   // Map backend clause_reviews to ClauseAnnotation format
   const clauses: ClauseAnnotation[] = (() => {
     const reviews = result?.clause_reviews as
-      | { clause_id: string; risk_level: string; issues: string[] }[]
+      | { clause_id: string; risk_level: string; issues: string[]; redline_reason?: string; text_snippet?: string }[]
       | undefined;
     if (reviews?.length) {
       return reviews.map((r) => ({
@@ -40,6 +40,8 @@ export default function ContractReviewPage() {
         title: r.clause_id,
         risk: (r.risk_level as ClauseAnnotation["risk"]) ?? "ok",
         notes: r.issues?.join("; ") ?? "",
+        reason: r.redline_reason ?? "",
+        textSnippet: r.text_snippet ?? "",
       }));
     }
     return MOCK_CLAUSE_ANNOTATIONS;

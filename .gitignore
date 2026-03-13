@@ -16,6 +16,9 @@ node_modules/
 
 # Data / models
 backend/data/
+backend/.venv/
+backend/.env
+frontend/.env
 *.index
 *.jsonl
 

@@ -47,12 +47,17 @@ def review_loop(state: ContractReviewState) -> dict:
             node_types=["Statute", "Case", "LegalConcept"],
         )
         risk = _score_clause_risk(clause, state["jurisdiction"])
+        issues = _identify_issues(clause, state["jurisdiction"])
+        redline = _generate_redline(clause, state["jurisdiction"])
+        reason = _generate_redline_reason(clause, issues, state["jurisdiction"])
         reviews.append(
             ClauseReview(
                 clause_id=clause["id"],
                 risk_level=risk,
-                issues=_identify_issues(clause, state["jurisdiction"]),
-                redline_suggestion=_generate_redline(clause, state["jurisdiction"]),
+                issues=issues,
+                redline_suggestion=redline,
+                redline_reason=reason,
+                text_snippet=clause["text"][:120],
                 applicable_statutes=[
                     n.get("title", "") for n in graph_results.get("nodes", [])[:2]
                 ],
@@ -168,21 +173,81 @@ def _identify_issues(clause: Clause, jurisdiction: str) -> list[str]:
     return issues_map.get(clause.get("type", ""), [])
 
 
+_REDLINE_PREAMBLES = [
+    "here is the rewritten clause:",
+    "here's the rewritten clause:",
+    "rewritten clause:",
+    "revised clause:",
+    "modified clause:",
+    "updated clause:",
+    "here is my rewrite:",
+    "here is the revised clause:",
+    "here is the modified clause:",
+    "rewrite:",
+]
+
+
 def _generate_redline(clause: Clause, jurisdiction: str) -> str:
-    """Generate a redlined version of the clause via Gemini."""
+    """Generate a redlined version of the clause via Gemini.
+
+    Returns ONLY the rewritten clause text — no preambles or explanations.
+    """
     try:
         llm = get_llm(
             f"You are a senior contract lawyer in {jurisdiction} jurisdiction "
-            f"representing the client (buyer/licensee). Rewrite clauses to be more favourable to the client."
+            f"representing the client (buyer/licensee). "
+            f"Output ONLY the rewritten clause text. Never include explanations, preambles, or commentary."
         )
         prompt = (
             f"Rewrite this contract clause to better protect the client's interests. "
-            f"Keep the same structure but improve the legal language:\n\n{clause['text']}"
+            f"OUTPUT ONLY the rewritten clause text. "
+            f"Do NOT include any preamble, heading, explanation, commentary, or notes. "
+            f"Start directly with the rewritten clause text:\n\n{clause['text']}"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        return response.content.strip()
+        text = response.content.strip()
+
+        # Strip common Gemini preambles (case-insensitive)
+        lower = text.lower()
+        for preamble in _REDLINE_PREAMBLES:
+            if lower.startswith(preamble):
+                text = text[len(preamble):].lstrip("\n ").strip()
+                break
+
+        # If response is empty or suspiciously short, return original
+        if not text or len(text) < 10:
+            return clause["text"]
+
+        return text
     except Exception:
-        return f"[Redline for {clause.get('type', 'clause')} — Gemini API unavailable]"
+        return clause["text"]  # Return original unchanged — don't pollute the diff
+
+
+def _generate_redline_reason(clause: Clause, issues: list[str], jurisdiction: str) -> str:
+    """Generate a one-sentence reason explaining why this specific clause was rewritten."""
+    if not issues:
+        return f"Clause rewritten to improve client protections under {jurisdiction} law."
+    try:
+        llm = get_llm(
+            f"You are a senior contract lawyer in {jurisdiction} jurisdiction. "
+            f"Explain redline changes concisely."
+        )
+        issues_text = "; ".join(issues[:2])
+        prompt = (
+            f"In ONE sentence, explain why this contract clause was rewritten. "
+            f"Clause type: {clause.get('type', 'general')}. "
+            f"Identified issues: {issues_text}. "
+            f"Start with 'Rewritten to...' or 'Modified to...'"
+        )
+        response = llm.invoke([HumanMessage(content=prompt)])
+        reason = response.content.strip()
+        # Ensure single sentence
+        reason = reason.split("\n")[0].split(". ")[0]
+        if reason and not reason.endswith("."):
+            reason += "."
+        return reason if reason else f"Rewritten to address: {issues_text}."
+    except Exception:
+        return f"Rewritten to address: {'; '.join(issues[:2])}." if issues else ""
 
 
 # ─── Graph construction ────────────────────────────────────────────────────────

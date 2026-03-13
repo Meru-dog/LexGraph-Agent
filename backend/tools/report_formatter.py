@@ -4,6 +4,23 @@ from datetime import date
 from typing import List
 
 
+# Named sections for the 12-section DD report
+_DD_SECTION_TITLES: dict[str, str] = {
+    "01": "Corporate Structure & Governance",
+    "02": "Financial Performance & Health",
+    "03": "Indebtedness & Capital Structure",
+    "04": "Regulatory Compliance & Licensing",
+    "05": "Material Contracts & Agreements",
+    "06": "Intellectual Property & Technology",
+    "07": "Employment & Labor Relations",
+    "08": "Litigation & Legal Risk",
+    "09": "ESG & Environmental Compliance",
+    "10": "Market Position & Competition",
+    "11": "Operational Risk",
+    "12": "Transaction Risk & Deal Terms",
+}
+
+
 def report_formatter(findings: list, template: str) -> dict:
     """Generate a structured report dict.
 
@@ -23,6 +40,10 @@ def _build_dd_report(findings: list) -> dict:
         sec = f.get("section", "08")
         sections_map.setdefault(sec, []).append({"status": f.get("status", "ok"), "text": f.get("text", "")})
 
+    # Ensure all 12 sections appear (even if empty)
+    for sec_num in _DD_SECTION_TITLES:
+        sections_map.setdefault(sec_num, [])
+
     critical = sum(1 for f in findings if f.get("status") == "critical")
     high = sum(1 for f in findings if f.get("status") == "high")
     medium = sum(1 for f in findings if f.get("status") in ("medium", "warn"))
@@ -41,7 +62,11 @@ def _build_dd_report(findings: list) -> dict:
             "recommendation": "Review required before proceeding.",
         },
         "sections": [
-            {"num": sec, "title": f"Section {sec}", "items": items}
+            {
+                "num": sec,
+                "title": _DD_SECTION_TITLES.get(sec, f"Section {sec}"),
+                "items": items,
+            }
             for sec, items in sorted(sections_map.items())
         ],
     }

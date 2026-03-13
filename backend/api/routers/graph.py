@@ -38,14 +38,24 @@ async def graph_stats():
 
 @router.get("/sample")
 async def sample_graph(limit: int = Query(default=60, ge=10, le=200)):
-    """Return a sample subgraph (nodes + relationships) for force-directed visualization."""
+    """Return a sample subgraph (nodes + relationships) for force-directed visualization.
+
+    Excludes raw Chunk nodes (which contain unreadable embedding text) and shows only
+    meaningful semantic nodes: Statute, Case, Provision, LegalConcept, Entity, Document.
+    """
     try:
         from graph.neo4j_client import neo4j_client
         if not neo4j_client._driver:
             return _mock_graph()
         with neo4j_client._driver.session() as session:
+            # Exclude Chunk nodes — they contain raw text and clutter the graph
             node_rows = list(session.run(
-                "MATCH (n) RETURN elementId(n) AS eid, labels(n) AS labels, properties(n) AS props LIMIT $limit",
+                """
+                MATCH (n)
+                WHERE NOT n:Chunk
+                RETURN elementId(n) AS eid, labels(n) AS labels, properties(n) AS props
+                LIMIT $limit
+                """,
                 {"limit": limit},
             ))
             nodes = []
@@ -53,8 +63,13 @@ async def sample_graph(limit: int = Query(default=60, ge=10, le=200)):
             for row in node_rows:
                 props = dict(row["props"])
                 nid = str(props.get("node_id") or row["eid"])
+                labels = list(row["labels"])
+                # Build a clean display label (never show raw text blobs)
                 props["_id"] = nid
-                props["_labels"] = list(row["labels"])
+                props["_labels"] = labels
+                props["_display_label"] = _make_display_label(props, labels)
+                # Strip the raw text field so it doesn't leak to the frontend
+                props.pop("text", None)
                 nodes.append(props)
                 eid_to_id[row["eid"]] = nid
 
@@ -63,6 +78,7 @@ async def sample_graph(limit: int = Query(default=60, ge=10, le=200)):
                 """
                 MATCH (a)-[r]->(b)
                 WHERE elementId(a) IN $eids AND elementId(b) IN $eids
+                  AND NOT a:Chunk AND NOT b:Chunk
                 RETURN type(r) AS type,
                        coalesce(a.node_id, elementId(a)) AS src,
                        coalesce(b.node_id, elementId(b)) AS tgt
@@ -75,6 +91,23 @@ async def sample_graph(limit: int = Query(default=60, ge=10, le=200)):
     except Exception as e:
         print(f"[graph/sample] {e}")
         return _mock_graph()
+
+
+def _make_display_label(props: dict, labels: list) -> str:
+    """Create a short, human-readable display label for a graph node."""
+    # Prefer explicit name/title fields
+    label = props.get("name") or props.get("title") or props.get("node_id", "")
+    if label:
+        return str(label)[:40]
+    # For Document nodes, use filename
+    if "Document" in labels:
+        return str(props.get("filename") or props.get("doc_id", "Document"))[:30]
+    # For Entity nodes, use spacy_label + name
+    if "Entity" in labels:
+        spacy = props.get("spacy_label", "")
+        return f"{spacy}: {props.get('name', '')}"[:30] if spacy else str(props.get("name", "Entity"))[:30]
+    # Fallback: use the node_id/eid but truncate
+    return str(props.get("node_id", "Node"))[:20]
 
 
 def _mock_graph() -> dict:

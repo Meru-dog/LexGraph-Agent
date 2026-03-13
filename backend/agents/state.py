@@ -36,6 +36,7 @@ class DDState(TypedDict):
     jurisdiction: str           # "JP" | "US" | "both"
     documents: List[dict]
     prompt: str
+    model_name: str             # "gemini" | "llama" | "fine_tuned"
 
     # Planning
     dd_checklist: List[dict]
@@ -44,6 +45,9 @@ class DDState(TypedDict):
     corporate_findings: List[Finding]
     contract_findings: List[Finding]
     regulatory_findings: List[Finding]
+    financial_findings: List[Finding]
+    legal_findings: List[Finding]
+    business_findings: List[Finding]
 
     # Synthesis
     risk_matrix: RiskMatrix
@@ -73,6 +77,8 @@ class ClauseReview(TypedDict):
     risk_level: str     # "critical" | "high" | "medium" | "low"
     issues: List[str]
     redline_suggestion: str
+    redline_reason: str  # Brief explanation of why this clause was rewritten
+    text_snippet: str    # First ~100 chars of original clause text (for diff matching)
     applicable_statutes: List[str]
     citations: List[str]
 

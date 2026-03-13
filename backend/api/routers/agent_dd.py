@@ -13,8 +13,8 @@ from api.audit.logger import log_dd_start, log_dd_approve, log_export
 
 router = APIRouter(prefix="/agent/dd", tags=["dd-agent"])
 
-# In-memory task store (replace with Redis/PostgreSQL in Phase 6)
-_tasks: dict[str, dict] = {}
+from db.task_store import TaskStore
+_tasks = TaskStore("dd_tasks")
 
 
 class DDRequest(BaseModel):
@@ -22,6 +22,7 @@ class DDRequest(BaseModel):
     jurisdiction: str = "JP+US"
     document_ids: list[str] = []
     transaction_type: str = "investment"
+    model_name: str = "gemini"  # "gemini" | "llama" | "fine_tuned"
 
 
 class ReviewRequest(BaseModel):
@@ -32,9 +33,7 @@ class ReviewRequest(BaseModel):
 
 def _run_dd_agent(task_id: str, request: DDRequest) -> None:
     """Background task — runs DD agent and updates task store."""
-    import time
-
-    _tasks[task_id]["status"] = "running"
+    _tasks.update(task_id, {"status": "running"})
 
     try:
         from agents.dd_agent import dd_graph
@@ -44,11 +43,15 @@ def _run_dd_agent(task_id: str, request: DDRequest) -> None:
             "prompt": request.prompt,
             "jurisdiction": request.jurisdiction,
             "transaction_type": request.transaction_type,
+            "model_name": request.model_name,
             "documents": [{"id": d} for d in request.document_ids],
             "dd_checklist": [],
             "corporate_findings": [],
             "contract_findings": [],
             "regulatory_findings": [],
+            "financial_findings": [],
+            "legal_findings": [],
+            "business_findings": [],
             "risk_matrix": {"critical": [], "high": [], "medium": [], "low": []},
             "attorney_notes": "",
             "approved": False,
@@ -59,17 +62,20 @@ def _run_dd_agent(task_id: str, request: DDRequest) -> None:
 
         for step_output in dd_graph.stream(initial_state, config=config):
             node_name = list(step_output.keys())[0]
-            _tasks[task_id]["current_step"] = _get_step_number(node_name)
-            _tasks[task_id]["step_label"] = node_name.replace("_", " ").title()
+            _tasks.update(task_id, {
+                "current_step": _get_step_number(node_name),
+                "step_label": node_name.replace("_", " ").title(),
+            })
 
         state = dd_graph.get_state(config)
-        _tasks[task_id]["report"] = state.values.get("dd_report")
-        _tasks[task_id]["status"] = "complete"
+        _tasks.update(task_id, {
+            "report": state.values.get("dd_report"),
+            "status": "complete",
+        })
         _notify_ws(task_id, "complete")
 
     except Exception as e:
-        _tasks[task_id]["status"] = "error"
-        _tasks[task_id]["error"] = str(e)
+        _tasks.update(task_id, {"status": "error", "error": str(e)})
 
 
 def _get_step_number(node_name: str) -> int:
@@ -78,18 +84,29 @@ def _get_step_number(node_name: str) -> int:
         "corporate_reviewer": 2,
         "contract_reviewer": 3,
         "regulatory_checker": 4,
-        "risk_synthesizer": 5,
-        "human_checkpoint": 6,
-        "re_investigate": 7,
-        "report_generator": 8,
+        "financial_analyzer": 5,
+        "legal_risk_analyzer": 6,
+        "business_analyzer": 7,
+        "risk_synthesizer": 8,
+        "human_checkpoint": 9,
+        "re_investigate": 10,
+        "report_generator": 11,
     }
     return step_map.get(node_name, 0)
 
 
+@router.get("/models")
+async def list_models(_user: User = Depends(get_current_user)):
+    """Return available LLM models for DD agent."""
+    from models.model_factory import get_available_models
+    return get_available_models()
+
+
 @router.get("")
-async def list_dd_tasks(_user: User = Depends(get_current_user)):
+async def list_dd_tasks(current_user: User = Depends(get_current_user)):
     """List all DD agent tasks (newest first)."""
-    return sorted(_tasks.values(), key=lambda t: t.get("created_at", ""), reverse=True)
+    user_id = getattr(current_user, "id", None)
+    return _tasks.list(user_id=user_id)
 
 
 @router.post("")
@@ -99,7 +116,7 @@ async def start_dd_agent(
     current_user: User = Depends(get_current_user),
 ):
     task_id = str(uuid.uuid4())
-    _tasks[task_id] = {
+    _tasks.set(task_id, {
         "task_id": task_id,
         "status": "running",
         "current_step": 0,
@@ -108,7 +125,8 @@ async def start_dd_agent(
         "report": None,
         "created_at": datetime.utcnow().isoformat(),
         "request": request.model_dump(),
-    }
+        "user_id": getattr(current_user, "id", current_user.username),
+    })
     log_dd_start(current_user.username, task_id, request.prompt)
     background_tasks.add_task(_run_dd_agent, task_id, request)
     return {"task_id": task_id, "status": "running", "estimated_seconds": 90}
@@ -124,7 +142,7 @@ async def get_dd_status(task_id: str, _user: User = Depends(get_current_user)):
         "status": task["status"],
         "current_step": task["current_step"],
         "step_label": task["step_label"],
-        "partial_findings": task["partial_findings"],
+        "partial_findings": task.get("partial_findings", []),
         "report": task["report"],
     }
 
@@ -144,7 +162,7 @@ async def submit_review(
 
     log_dd_approve(current_user.username, task_id, review.approved, review.notes)
     # Resume graph with attorney feedback
-    task["status"] = "running"
+    _tasks.update(task_id, {"status": "running"})
 
     from agents.dd_agent import dd_graph
     config = {"configurable": {"thread_id": task_id}}
@@ -164,14 +182,15 @@ def _resume_dd_agent(task_id: str) -> None:
     try:
         for step_output in dd_graph.stream(None, config=config):
             node_name = list(step_output.keys())[0]
-            _tasks[task_id]["current_step"] = _get_step_number(node_name)
+            _tasks.update(task_id, {"current_step": _get_step_number(node_name)})
         state = dd_graph.get_state(config)
-        _tasks[task_id]["report"] = state.values.get("dd_report")
-        _tasks[task_id]["status"] = "complete"
+        _tasks.update(task_id, {
+            "report": state.values.get("dd_report"),
+            "status": "complete",
+        })
         _notify_ws(task_id, "complete")
     except Exception as e:
-        _tasks[task_id]["status"] = "error"
-        _tasks[task_id]["error"] = str(e)
+        _tasks.update(task_id, {"status": "error", "error": str(e)})
 
 
 def _notify_ws(task_id: str, status: str) -> None:
@@ -196,7 +215,7 @@ def _notify_ws(task_id: str, status: str) -> None:
 async def export_dd_report(task_id: str, current_user: User = Depends(get_current_user)):
     """Download the DD report as a formatted PDF."""
     task = _tasks.get(task_id)
-    if not task:
+    if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     if task["status"] not in ("complete", "awaiting_review"):
         raise HTTPException(status_code=409, detail="Report not ready")

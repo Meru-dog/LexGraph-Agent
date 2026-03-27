@@ -1,23 +1,42 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import UploadZone from "@/components/contract/UploadZone";
 import ClauseAnnotationCard from "@/components/contract/ClauseAnnotationCard";
 import DiffViewer from "@/components/contract/DiffViewer";
 import { useContractReviewContext } from "@/context/ContractReviewContext";
-import { downloadRedlinedDocx } from "@/lib/api";
+import { downloadRedlinedDocx, getAvailableModels } from "@/lib/api";
 import { MOCK_DIFF, MOCK_CLAUSE_ANNOTATIONS } from "@/lib/mockData";
 import { diffLines, countDiffStats } from "@/lib/diff";
 import type { DiffLine, ClauseAnnotation } from "@/lib/types";
 
+interface ModelOption {
+  id: string;
+  name: string;
+  type: string;
+  available: boolean;
+}
+
 export default function ContractReviewPage() {
   const { status, result, error, taskId, reviewFile, reset } = useContractReviewContext();
+  const [modelName, setModelName] = useState("ollama");
+  const [models, setModels] = useState<ModelOption[]>([
+    { id: "ollama", name: "Qwen3 Swallow 8B", type: "local", available: false },
+  ]);
+
+  useEffect(() => {
+    getAvailableModels()
+      .then((data) => { if (data?.length > 0) setModels(data); })
+      .catch(() => {});
+  }, []);
 
   const handleFile = (file: File) => {
     reviewFile(file, {
       jurisdiction: "US",
       contractType: "MSA",
       clientPosition: "buyer",
+      modelName,
     });
   };
 
@@ -63,6 +82,34 @@ export default function ContractReviewPage() {
           <div className="text-[11px] text-[#9CA3AF] mt-0.5">AI redlining as legal counsel</div>
         </div>
         <div className="p-5 flex flex-col gap-4">
+          {/* Model selector */}
+          <div>
+            <div className="text-[10px] font-semibold text-[#6B7280] uppercase tracking-wide mb-1.5">Model</div>
+            <div className="flex flex-col gap-1">
+              {models.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => m.available && setModelName(m.id)}
+                  disabled={!m.available || status !== "idle"}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] text-left transition-colors"
+                  style={{
+                    background: modelName === m.id ? "#EEF2FF" : "#F9FAFB",
+                    border: `1px solid ${modelName === m.id ? "#C7D2FE" : "#E5E7EB"}`,
+                    color: !m.available ? "#9CA3AF" : modelName === m.id ? "#4338CA" : "#374151",
+                    cursor: m.available && status === "idle" ? "pointer" : "not-allowed",
+                  }}
+                >
+                  <span>{m.id === "fine_tuned" ? "★" : m.type === "local" ? "⬡" : "☁"}</span>
+                  <span className="flex-1">{m.name}</span>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: m.available ? "#22C55E" : "#9CA3AF" }}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+
           {!hasFile ? (
             <UploadZone onFile={handleFile} />
           ) : (

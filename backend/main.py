@@ -10,12 +10,21 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 # Prevent tokenizer multiprocessing workers from deadlocking inside asyncio.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+import time
+import collections
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from api.routers import chat, upload, agent_dd, agent_review, graph, ws, auth
+from api.routers import chat, upload, agent_dd, agent_review, graph, ws, auth, evaluate
+
+# ── In-memory sliding-window rate limiter (per IP) ──────────────────────────
+# Env vars: RATE_LIMIT_REQUESTS (default 60), RATE_LIMIT_WINDOW_SECONDS (default 60)
+_RL_MAX = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
+_RL_WIN = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+_rl_buckets: dict = collections.defaultdict(collections.deque)   # ip → deque of timestamps
 
 
 @asynccontextmanager
@@ -74,6 +83,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Sliding-window per-IP rate limiter (RDD §16 production hardening).
+
+    Limits: RATE_LIMIT_REQUESTS requests per RATE_LIMIT_WINDOW_SECONDS seconds.
+    /health is exempt. Localhost (127.0.0.1) bypasses in dev.
+    """
+    ip = request.client.host if request.client else "unknown"
+
+    # Exempt: health checks and local dev
+    if request.url.path == "/health" or ip in ("127.0.0.1", "::1"):
+        return await call_next(request)
+
+    now = time.monotonic()
+    bucket = _rl_buckets[ip]
+
+    # Evict timestamps outside the window
+    while bucket and now - bucket[0] > _RL_WIN:
+        bucket.popleft()
+
+    if len(bucket) >= _RL_MAX:
+        retry_after = int(_RL_WIN - (now - bucket[0])) + 1
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"Rate limit exceeded. Retry after {retry_after}s."},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    bucket.append(now)
+    return await call_next(request)
+
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(upload.router)
@@ -81,6 +122,7 @@ app.include_router(agent_dd.router)
 app.include_router(agent_review.router)
 app.include_router(graph.router)
 app.include_router(ws.router)
+app.include_router(evaluate.router)
 
 
 @app.get("/health")

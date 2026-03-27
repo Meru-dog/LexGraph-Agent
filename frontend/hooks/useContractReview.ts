@@ -68,7 +68,7 @@ export function useContractReview() {
   const reviewFile = useCallback(
     async (
       file: File,
-      options: { jurisdiction: string; contractType: string; clientPosition: string }
+      options: { jurisdiction: string; contractType: string; clientPosition: string; modelName?: string }
     ) => {
       setState({ taskId: null, documentId: null, status: "uploading", result: null, error: null });
 
@@ -85,6 +85,7 @@ export function useContractReview() {
           jurisdiction: options.jurisdiction,
           contract_type: options.contractType,
           client_position: options.clientPosition,
+          model_name: options.modelName ?? "ollama",
         });
         const taskId: string = reviewData.task_id;
 

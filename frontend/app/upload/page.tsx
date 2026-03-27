@@ -245,8 +245,8 @@ export default function UploadPage() {
                   }}
                 >
                   {uploadResult?.neo4j_stored
-                    ? "Document ingested. Nodes and chunks stored in Neo4j + FAISS."
-                    : "Document stored. FAISS vectors indexed. Neo4j not connected — graph nodes skipped."}
+                    ? "Document ingested. Nodes and chunks stored in Neo4j + pgvector."
+                    : "Document stored. pgvector chunks indexed. Neo4j not connected — graph nodes skipped."}
                 </div>
               )}
 

@@ -22,7 +22,7 @@ class DDRequest(BaseModel):
     jurisdiction: str = "JP+US"
     document_ids: list[str] = []
     transaction_type: str = "investment"
-    model_name: str = "gemini"  # "gemini" | "llama" | "fine_tuned"
+    model_name: str = "ollama"  # "ollama" | "fine_tuned" | "gemini"
 
 
 class ReviewRequest(BaseModel):

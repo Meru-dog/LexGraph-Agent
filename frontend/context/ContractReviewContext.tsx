@@ -6,7 +6,7 @@ import { useContractReview, ContractReviewState, ReviewStatus } from "@/hooks/us
 interface ContractReviewContextValue extends ContractReviewState {
   reviewFile: (
     file: File,
-    options: { jurisdiction: string; contractType: string; clientPosition: string }
+    options: { jurisdiction: string; contractType: string; clientPosition: string; modelName?: string }
   ) => Promise<void>;
   reset: () => void;
 }

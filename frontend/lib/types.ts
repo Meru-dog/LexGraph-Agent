@@ -1,6 +1,6 @@
 // ─── LLM Model ────────────────────────────────────────────────────────────────
 
-export type LLMModel = "gemini" | "llama" | "fine_tuned";
+export type LLMModel = "ollama" | "fine_tuned" | "gemini";
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
@@ -14,12 +14,16 @@ export interface Citation {
   url: string | null;
 }
 
+export type RouteUsed = "dd_agent" | "contract_agent" | "graph_rag" | "vector_rag" | "direct_answer";
+
 export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
   citations?: Citation[];
   timestamp: Date;
+  route_used?: RouteUsed;
+  adapter_mode?: "thinking" | "non_thinking";
 }
 
 export type Jurisdiction = "JP" | "US" | "JP+US" | "auto";

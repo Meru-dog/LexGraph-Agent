@@ -4,29 +4,50 @@ __pycache__/
 *.pyo
 .venv/
 venv/
-.env
 *.egg-info/
 dist/
 build/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
 
 # Node
 node_modules/
 .next/
 .vercel/
 
-# Data / models
+# Environment / Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Data / logs
 backend/data/
-backend/.venv/
-backend/.env
-frontend/.env
 *.index
-*.jsonl
+
+# Fine-tuning artifacts (large binaries)
+backend/fine_tune/adapters/
+backend/fine_tune/gguf/
+backend/fine_tune/data/*.jsonl
+!backend/fine_tune/data/.gitkeep
+
+# llama.cpp (compiled C++ library — clone separately)
+backend/llama.cpp/
+
+# W&B
+wandb/
 
 # IDE
 .DS_Store
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Secrets
-*.pem
-*.key
+# OS
+Thumbs.db

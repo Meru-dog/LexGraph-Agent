@@ -12,7 +12,7 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".html"}
 MAX_FILE_SIZE_MB = 50
 
 # In-memory document store (document_id → {bytes, filename}).
-# Production: replace with MinIO/S3 client.
+# Production: replace with Supabase Storage client.
 _document_store: dict[str, dict] = {}
 
 
@@ -31,6 +31,7 @@ def get_document_filename(doc_id: str) -> str | None:
 async def upload_document(
     file: UploadFile = File(...),
     document_type: str = Form(default="other"),
+    jurisdiction: str = Form(default=""),
 ):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -42,13 +43,18 @@ async def upload_document(
         raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE_MB}MB limit")
 
     doc_id = str(uuid.uuid4())
-    _document_store[doc_id] = {"bytes": contents, "filename": file.filename}
+    _document_store[doc_id] = {
+        "bytes": contents,
+        "filename": file.filename,
+        "document_type": document_type,
+        "jurisdiction": jurisdiction,
+    }
 
     # ── Fast synchronous pipeline (no ML inference) ────────────────────────
     # Embedding uses sentence-transformers which spawns multiprocessing workers
     # that deadlock inside asyncio event loops on macOS (PyTorch/MPS constraint).
     # Embedding is deferred to the POST /ingest/{doc_id} endpoint or background job.
-    result = _run_fast_pipeline(contents, doc_id, document_type, file.filename)
+    result = _run_fast_pipeline(contents, doc_id, document_type, file.filename, jurisdiction)
 
     neo4j_stored = result.get("neo4j_stored", False)
     return {
@@ -89,13 +95,15 @@ async def ingest_document(doc_id: str):
 
     contents = entry["bytes"]
     filename = entry["filename"]
+    document_type = entry.get("document_type", "other")
+    jurisdiction = entry.get("jurisdiction", "")
 
     try:
         from ingestion.pipeline import _extract_text
         from ingestion.chunker import chunk_text
 
         text = _extract_text(contents, filename)
-        chunks = chunk_text(text, doc_id)
+        chunks = chunk_text(text, doc_id, document_type=document_type, jurisdiction=jurisdiction)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Text extraction failed: {e}")
 
@@ -120,7 +128,7 @@ async def ingest_document(doc_id: str):
 
 
 def _run_fast_pipeline(contents: bytes, doc_id: str, document_type: str,
-                        filename: str | None) -> dict:
+                        filename: str | None, jurisdiction: str = "") -> dict:
     try:
         from ingestion.pipeline import _extract_text
         from ingestion.chunker import chunk_text
@@ -128,7 +136,7 @@ def _run_fast_pipeline(contents: bytes, doc_id: str, document_type: str,
         from ingestion.graph_builder import build_graph_nodes
 
         text = _extract_text(contents, filename)
-        chunks = chunk_text(text, doc_id)
+        chunks = chunk_text(text, doc_id, document_type=document_type, jurisdiction=jurisdiction)
         entities = extract_entities(text)
         graph_result = build_graph_nodes(
             chunks=chunks, entities=entities,

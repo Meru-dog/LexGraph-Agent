@@ -58,12 +58,15 @@ def train(
     batch_size: int = 1,
     learning_rate: float = 2e-4,
     max_seq_length: int = 512,
+    adapter: str = "JP",          # "JP" | "US" — for W&B run naming
+    lora_rank: int = 16,
+    lora_alpha: int = 32,
 ):
     try:
         import torch
-        from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
+        from transformers import AutoTokenizer, AutoModelForCausalLM
         from peft import LoraConfig, get_peft_model, TaskType
-        from trl import SFTTrainer
+        from trl import SFTTrainer, SFTConfig
         from datasets import Dataset
     except ImportError as e:
         raise SystemExit(
@@ -74,6 +77,30 @@ def train(
     device = _detect_device()
     print(f"Device: {device}")
 
+    # ── W&B initialisation (RDD §12.5 / §13) ─────────────────────────────────
+    _wandb_run = None
+    try:
+        import wandb, time
+        _wandb_run = wandb.init(
+            project="lexgraph-finetune",
+            name=f"{base_model.split('/')[-1]}-{adapter.lower()}-r{lora_rank}-{int(time.time())}",
+            config={
+                "base_model":    base_model,
+                "adapter":       adapter,
+                "lora_rank":     lora_rank,
+                "lora_alpha":    lora_alpha,
+                "epochs":        epochs,
+                "batch_size":    batch_size,
+                "lr":            learning_rate,
+                "max_seq_length": max_seq_length,
+                "data_path":     data_path,
+                "device":        device,
+            },
+        )
+        print(f"[wandb] Run: {_wandb_run.url}")
+    except Exception as e:
+        print(f"[wandb] init skipped (non-fatal): {e}")
+
     print(f"Loading dataset from {data_path}...")
     raw = load_dataset_from_jsonl(data_path)
     texts = [format_prompt(ex) for ex in raw]
@@ -82,21 +109,24 @@ def train(
     print(f"Loading base model: {base_model}")
     # Mac MPS/CPU: load in float16 (bitsandbytes 4-bit not supported on Apple Silicon)
     dtype = torch.float16
-    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model, trust_remote_code=True, local_files_only=True
+    )
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=dtype,
+        dtype=dtype,
         device_map={"": device},
         trust_remote_code=True,
+        local_files_only=True,
     )
     model.config.use_cache = False
     model.enable_input_require_grads()
 
     lora_config = LoraConfig(
-        r=8,                    # lower rank = less memory
-        lora_alpha=16,
-        target_modules=["q_proj", "v_proj"],   # fewer modules = less memory
+        r=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
@@ -104,30 +134,29 @@ def train(
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=output_dir,
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=8,   # effective batch = 8
-        gradient_checkpointing=True,     # saves memory
+        gradient_accumulation_steps=8,
+        gradient_checkpointing=True,
         warmup_steps=5,
         learning_rate=learning_rate,
-        fp16=False,                      # MPS doesn't support fp16 training
+        fp16=False,
         bf16=False,
         logging_steps=1,
         save_strategy="epoch",
-        optim="adamw_torch",             # paged_adamw_8bit requires CUDA
-        report_to="none",
-        use_mps_device=(device == "mps"),
+        optim="adamw_torch",
+        report_to="wandb" if _wandb_run else "none",
+        max_length=max_seq_length,
+        dataset_text_field="text",
+        packing=False,
     )
 
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset,
         args=training_args,
-        max_seq_length=max_seq_length,
-        dataset_text_field="text",
-        packing=False,
     )
 
     print("Starting training...")
@@ -135,26 +164,57 @@ def train(
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
     print(f"\nAdapter saved to {output_dir}")
+
+    # ── W&B: save adapter as Artifact ────────────────────────────────────────
+    if _wandb_run:
+        try:
+            import wandb
+            artifact = wandb.Artifact(
+                name=f"lexgraph-adapter-{adapter.lower()}",
+                type="model",
+                description=f"QLoRA adapter {adapter} — {base_model}",
+                metadata={
+                    "base_model":  base_model,
+                    "adapter":     adapter,
+                    "lora_rank":   lora_rank,
+                    "lora_alpha":  lora_alpha,
+                    "epochs":      epochs,
+                    "data_path":   data_path,
+                },
+            )
+            artifact.add_dir(output_dir)
+            _wandb_run.log_artifact(artifact)
+            _wandb_run.finish()
+            print(f"[wandb] Adapter artifact logged")
+        except Exception as e:
+            print(f"[wandb] artifact log error (non-fatal): {e}")
+
     print("\nNext step: merge & export to GGUF for Ollama:")
     print(f"  python fine_tune/export_gguf.py --adapter {output_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune Llama 3.1 8B for LexGraph Legal")
-    # NousResearch mirror is not gated — no HuggingFace approval needed
-    # Alternative: meta-llama/Llama-3.1-8B-Instruct (requires HF access request)
-    parser.add_argument("--base_model", default="NousResearch/Meta-Llama-3.1-8B-Instruct")
+    # Qwen2.5-1.5B: ~3GB, multilingual JP/EN, fits on Mac MPS, not gated
+    # Alternative (needs more RAM): NousResearch/Meta-Llama-3.1-8B-Instruct
+    parser.add_argument("--base_model", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--data_path", default="fine_tune/data/legal_qa.jsonl")
     parser.add_argument("--output_dir", default="fine_tune/adapters/lexgraph-legal")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--adapter", default="JP", choices=["JP", "US"])
+    parser.add_argument("--lora_rank", type=int, default=16)
+    parser.add_argument("--lora_alpha", type=int, default=32)
     args = parser.parse_args()
     train(
         base_model=args.base_model,
         data_path=args.data_path,
         output_dir=args.output_dir,
         epochs=args.epochs,
+        adapter=args.adapter,
+        lora_rank=args.lora_rank,
+        lora_alpha=args.lora_alpha,
         batch_size=args.batch_size,
         learning_rate=args.lr,
     )

@@ -29,6 +29,7 @@ interface RawNode {
   jurisdiction?: string;
   filename?: string;
   spacy_label?: string;
+  status?: string;  // ACTIVE | ARCHIVED | DRAFT
 }
 interface RawEdge { source: string; target: string; type: string; }
 interface GraphData { nodes: RawNode[]; relationships: RawEdge[]; connected: boolean; }
@@ -40,7 +41,11 @@ function nodeLabel(n: RawNode): string {
   return label.slice(0, 22);
 }
 function primaryLabel(n: RawNode): string { return n._labels[0] ?? "Node"; }
-function nodeColor(n: RawNode) { return LABEL_COLOR[primaryLabel(n)] ?? DEFAULT_COLOR; }
+function nodeColor(n: RawNode) {
+  // ARCHIVED nodes rendered grey to distinguish from ACTIVE
+  if (n.status === "ARCHIVED") return { fill: "#9CA3AF", stroke: "#6B7280" };
+  return LABEL_COLOR[primaryLabel(n)] ?? DEFAULT_COLOR;
+}
 
 export default function GraphPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -53,10 +58,50 @@ export default function GraphPage() {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [stats, setStats] = useState<{ connected: boolean; nodes: number; relationships: number; by_label: Record<string, number> } | null>(null);
   const [selectedNode, setSelectedNode] = useState<SimNode | null>(null);
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  const [expanding, setExpanding] = useState(false);
 
   const authHeaders = (): HeadersInit => {
     const token = typeof window !== "undefined" ? localStorage.getItem("lexgraph_access_token") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const toggleType = (label: string) => {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  };
+
+  const expandNode = async (nodeId: string) => {
+    if (!graphData || expanding) return;
+    setExpanding(true);
+    try {
+      const res = await fetch(`${BASE_URL}/graph/node/${encodeURIComponent(nodeId)}?hops=1`, { headers: authHeaders() });
+      const data = await res.json();
+      const newNodes: RawNode[] = data.nodes ?? [];
+      const newRels: RawEdge[] = (data.relationships ?? []).map((r: { type: string; start: string; end: string }) => ({
+        source: r.start,
+        target: r.end,
+        type: r.type,
+      }));
+      setGraphData((prev) => {
+        if (!prev) return prev;
+        const existingIds = new Set(prev.nodes.map((n) => n._id));
+        const merged = [...prev.nodes, ...newNodes.filter((n) => !existingIds.has(n._id))];
+        const existingRels = new Set(prev.relationships.map((r) => `${r.source}|${r.target}|${r.type}`));
+        const mergedRels = [
+          ...prev.relationships,
+          ...newRels.filter((r) => !existingRels.has(`${r.source}|${r.target}|${r.type}`)),
+        ];
+        return { ...prev, nodes: merged, relationships: mergedRels };
+      });
+    } catch {
+      // ignore expand errors silently
+    } finally {
+      setExpanding(false);
+    }
   };
 
   useEffect(() => {
@@ -68,7 +113,7 @@ export default function GraphPage() {
       .catch(() => setStats({ connected: false, nodes: 0, relationships: 0, by_label: {} }));
   }, []);
 
-  // Run force simulation + canvas render whenever graph data loads
+  // Run force simulation + canvas render whenever graph data or filters change
   useEffect(() => {
     if (!graphData || !canvasRef.current || !wrapRef.current) return;
 
@@ -83,10 +128,15 @@ export default function GraphPage() {
     const ctx = canvas.getContext("2d")!;
     ctx.scale(dpr, dpr);
 
+    // Filter nodes by hidden types
+    const visibleNodes = hiddenTypes.size > 0
+      ? graphData.nodes.filter((n) => !hiddenTypes.has(primaryLabel(n)))
+      : graphData.nodes;
+
     // Initialise simulation nodes arranged in a circle
     const nodeMap = new Map<string, SimNode>();
-    const simNodes: SimNode[] = graphData.nodes.map((n, i) => {
-      const angle = (i / graphData.nodes.length) * 2 * Math.PI;
+    const simNodes: SimNode[] = visibleNodes.map((n, i) => {
+      const angle = (i / visibleNodes.length) * 2 * Math.PI;
       const rad = Math.min(W, H) * 0.28;
       const sn: SimNode = { ...n, x: W / 2 + rad * Math.cos(angle), y: H / 2 + rad * Math.sin(angle), vx: 0, vy: 0, r: 18 };
       nodeMap.set(n._id, sn);
@@ -209,7 +259,7 @@ export default function GraphPage() {
     cancelAnimationFrame(animRef.current);
     animRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(animRef.current);
-  }, [graphData]);
+  }, [graphData, hiddenTypes]);
 
   const pickNode = (e: React.MouseEvent<HTMLCanvasElement>): SimNode | null => {
     const canvas = canvasRef.current;
@@ -274,20 +324,37 @@ export default function GraphPage() {
             )}
           </div>
 
-          {/* Legend */}
+          {/* Legend + Filter */}
           <div className="px-4 py-3">
-            <div className="text-[9px] font-semibold text-[#9CA3AF] uppercase tracking-wide mb-2">Node Types</div>
+            <div className="text-[9px] font-semibold text-[#9CA3AF] uppercase tracking-wide mb-2">
+              Filter Node Types
+            </div>
             {NODE_TYPES.map((label) => {
               const color = LABEL_COLOR[label] ?? DEFAULT_COLOR;
               const count = stats?.by_label[label];
+              const hidden = hiddenTypes.has(label);
               return (
-                <div key={label} className="flex items-center gap-2 py-0.5">
+                <button
+                  key={label}
+                  onClick={() => toggleType(label)}
+                  className="flex items-center gap-2 py-0.5 w-full text-left hover:opacity-80 transition-opacity"
+                  style={{ opacity: hidden ? 0.4 : 1 }}
+                >
                   <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: color.fill }} />
                   <span className="text-[11px] text-[#374151] flex-1">{label}</span>
                   {count != null && <span className="text-[10px] text-[#9CA3AF]">{count}</span>}
-                </div>
+                  {hidden && <span className="text-[9px] text-[#D1D5DB]">hidden</span>}
+                </button>
               );
             })}
+            {hiddenTypes.size > 0 && (
+              <button
+                onClick={() => setHiddenTypes(new Set())}
+                className="mt-2 text-[10px] text-[#4F46E5] underline"
+              >
+                Show all
+              </button>
+            )}
           </div>
 
           {/* Selected node detail */}
@@ -313,6 +380,31 @@ export default function GraphPage() {
                 )}
               </div>
               <div className="text-[9px] text-[#9CA3AF] mt-2 font-mono break-all">{selectedNode._id}</div>
+              {selectedNode.status && selectedNode.status !== "ACTIVE" && (
+                <div
+                  className="mt-1 text-[9px] px-1.5 py-0.5 rounded inline-block"
+                  style={{
+                    background: selectedNode.status === "ARCHIVED" ? "#FEF3C7" : "#F3F4F6",
+                    color: selectedNode.status === "ARCHIVED" ? "#92400E" : "#6B7280",
+                  }}
+                >
+                  {selectedNode.status}
+                </div>
+              )}
+              {graphData?.connected && (
+                <button
+                  onClick={() => expandNode(selectedNode._id)}
+                  disabled={expanding}
+                  className="mt-2 w-full text-[10px] py-1 rounded text-center transition-colors"
+                  style={{
+                    background: expanding ? "#E5E7EB" : "#EEF2FF",
+                    color: expanding ? "#9CA3AF" : "#4F46E5",
+                    border: "1px solid #C7D2FA",
+                  }}
+                >
+                  {expanding ? "Expanding…" : "Expand neighbors"}
+                </button>
+              )}
             </div>
           )}
 

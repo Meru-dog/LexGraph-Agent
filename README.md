@@ -1,8 +1,8 @@
 # LexGraph Agent
 
-**Graph RAG legal research platform for Japanese and US dual-jurisdiction practice.**
+**Graph RAG legal research platform for JP/US dual-jurisdiction practice.**
 
-LexGraph Agent combines a Neo4j knowledge graph, FAISS vector search, and a Gemini-powered LLM to help attorneys and paralegals perform due diligence, contract review, and legal research across JP and US law — all in a single platform with a human-in-the-loop review workflow.
+LexGraph Agent combines a Neo4j knowledge graph, Supabase pgvector search, and a local Qwen3 Swallow 8B LLM (via Ollama) to help attorneys and paralegals perform due diligence, contract review, and legal research across Japanese and US law. All client document processing runs locally to maintain attorney-client privilege (守秘義務).
 
 ---
 
@@ -10,14 +10,17 @@ LexGraph Agent combines a Neo4j knowledge graph, FAISS vector search, and a Gemi
 
 | Feature | Description |
 |---|---|
-| **Legal Chat** | SSE-streaming Q&A with citations from the knowledge graph and vector index |
-| **DD Agent** | 8-section CFI-format due diligence report (LangGraph, human approval gate) |
-| **Contract Review** | AI redlining with clause-by-clause risk annotations and DOCX export |
-| **Knowledge Graph** | Neo4j graph of statutes, provisions, entities, and cross-jurisdictional analogies |
-| **Document Upload** | PDF/DOCX ingestion → NER → graph embedding pipeline |
-| **Task Dashboard** | Real-time attorney task monitor with WebSocket status updates |
-| **JWT Auth + RBAC** | Attorney / paralegal / admin roles; paralegals cannot approve reviews |
-| **Audit Log** | Append-only JSONL log of every login, upload, agent run, approval, and export |
+| **Legal Chat** | SSE-streaming Q&A with Self-Route classification (5 routes) and hybrid retrieval |
+| **DD Agent** | 8-node LangGraph due diligence workflow with parallel investigation and attorney approval gate |
+| **Contract Review** | AI redlining with clause-by-clause risk annotations, diff viewer, and DOCX export |
+| **Knowledge Graph** | D3.js force-directed visualization with node filtering, expansion, and status color coding |
+| **Graph Quality Dashboard** | Admin metrics: ARCHIVED ratio, orphaned nodes, unverified nodes (>90d), integrity checks |
+| **Document Upload** | PDF/DOCX ingestion → statute-aware chunking → NER → graph nodes → pgvector embeddings |
+| **RAGAS Evaluation** | 25 JP/US test cases, 4 metrics (Faithfulness/Relevancy/Precision/Recall), W&B logging |
+| **Fine-tuning Pipeline** | QLoRA training (LoRA rank-16) with W&B experiment tracking and GGUF export for Ollama |
+| **JWT Auth + RBAC** | Attorney / paralegal / admin roles with audit logging |
+| **Rate Limiting** | Per-IP sliding-window rate limiter (configurable) |
+| **e-Gov Amendment Monitor** | Check Japanese law amendments via e-Gov API with auto-archive capability |
 
 ---
 
@@ -25,46 +28,67 @@ LexGraph Agent combines a Neo4j knowledge graph, FAISS vector search, and a Gemi
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Next.js 14 (App Router)  — localhost:3000                  │
-│  Chat · DD Agent · Contract Review · Tasks · Graph · Upload │
+│  Next.js 15 (App Router)  — localhost:3000                  │
+│  Chat · DD · Contract · Tasks · Graph · Quality · Upload    │
 └────────────────────┬────────────────────────────────────────┘
                      │ REST + SSE + WebSocket
 ┌────────────────────▼────────────────────────────────────────┐
 │  FastAPI (Python 3.11)  — localhost:8000                    │
-│  /auth  /chat  /upload  /agent/dd  /agent/review            │
-│  /graph  /ws/{session_id}                                   │
+│  /auth  /chat  /upload  /agent/dd  /agent/review           │
+│  /graph  /evaluate/ragas  /ws/{session_id}                  │
 │                                                             │
-│  LangGraph agents  ←→  Gemini 1.5 Pro                       │
-│  Tools: vector_search · graph_search · statute_lookup       │
+│  Self-Router (5 routes) → HybridRetriever (4 stages)       │
+│  LangGraph agents  ←→  Qwen3 Swallow 8B (Ollama)          │
+│  Tools: graph_search · vector_search · statute_lookup       │
 │         risk_classifier · clause_segmenter · report_fmt     │
-└──────┬──────────────────────────┬───────────────────────────┘
-       │                          │
-┌──────▼──────┐          ┌────────▼────────┐
-│   Neo4j 5   │          │   FAISS index   │
-│  knowledge  │          │  (multilingual  │
-│   graph     │          │   E5-large)     │
-└─────────────┘          └─────────────────┘
+└──────┬───────────────────┬──────────────────┬──────────────┘
+       │                   │                  │
+┌──────▼──────┐   ┌───────▼────────┐  ┌──────▼──────┐
+│   Neo4j 5   │   │   Supabase     │  │   Ollama    │
+│  knowledge  │   │   pgvector     │  │  Qwen3 8B   │
+│   graph     │   │   (1024-dim)   │  │  (local)    │
+└─────────────┘   └────────────────┘  └─────────────┘
 ```
 
-**Tech stack:**
+### Retrieval Pipeline
 
-- **Backend:** FastAPI · LangGraph · python-jose (JWT) · passlib (bcrypt) · pdfplumber · python-docx · reportlab · spaCy (ja_ginza + en_core_web_trf)
-- **Frontend:** Next.js 14 · React 18 · Tailwind CSS · TypeScript
-- **Storage:** Neo4j 5 (graph + fulltext index) · FAISS (vector) · MinIO (raw documents, optional)
-- **LLM:** Google Gemini 1.5 Pro (default) — swappable to vLLM/LLaMA via `USE_VLLM=true`
+```
+Query → Self-Router (5 routes + multi-hop regex signals)
+      → HybridRetriever:
+          ① pgvector semantic search (multilingual-e5-large)
+          ② Neo4j FULLTEXT keyword search
+          ③ APOC 2-hop BFS graph traversal
+          ④ CrossEncoder reranking (ms-marco-MiniLM-L-6-v2)
+      → LLM synthesis with LEGAL_SYSTEM_PROMPT
+```
+
+### Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 15 · React 18 · Tailwind CSS · TypeScript |
+| **Backend** | FastAPI · LangGraph · python-jose (JWT) · reportlab · python-docx |
+| **Graph DB** | Neo4j 5 (APOC, fulltext indexes) |
+| **Vector Store** | Supabase pgvector (1024-dim, multilingual-e5-large) |
+| **LLM (primary)** | Qwen3 Swallow 8B RL via Ollama — local, confidentiality-safe |
+| **LLM (optional)** | Gemini 2.5 Flash — non-confidential data only |
+| **Embeddings** | multilingual-e5-large (sentence-transformers) |
+| **Evaluation** | RAGAS + W&B (projects: lexgraph-rag, lexgraph-finetune) |
+| **Fine-tuning** | HuggingFace transformers + peft + trl (QLoRA) |
 
 ---
 
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 20+
-- Docker + Docker Compose (for Neo4j and MinIO)
-- A [Google AI Studio](https://aistudio.google.com/app/apikey) API key
+- Node.js 20+ (pnpm recommended)
+- Docker + Docker Compose (for Neo4j)
+- [Ollama](https://ollama.com/) with `qwen3-swallow:8b` model
+- Supabase project (for pgvector + auth) — or run without for dev mode
 
 ---
 
-## Local Setup
+## Quick Start
 
 ### 1. Clone and configure
 
@@ -74,87 +98,147 @@ cd LexGraph-Agent
 cp .env.example .env
 ```
 
-Edit `.env` and set at minimum:
+Edit `.env`:
 
 ```env
-GEMINI_API_KEY=AIza...          # required
-JWT_SECRET_KEY=<random-32-hex>  # generate: openssl rand -hex 32
-NEO4J_PASSWORD=lexgraph_dev     # matches docker-compose default
+# Required
+JWT_SECRET_KEY=<random-32-hex>        # openssl rand -hex 32
+NEO4J_PASSWORD=lexgraph_dev
+
+# Ollama (default: localhost:11434)
+OLLAMA_MODEL=qwen3-swallow:8b
+
+# Supabase (for pgvector + auth)
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+SUPABASE_ANON_KEY=eyJ...
+
+# Optional: Gemini for non-confidential tasks
+GEMINI_API_KEY=AIza...
 ```
 
-### 2. Start infrastructure (Neo4j + MinIO)
+### 2. Start Ollama + Neo4j
 
 ```bash
-docker compose up neo4j minio -d
-```
+# Start Ollama and pull the model
+ollama serve &
+ollama pull qwen3-swallow:8b
 
-Wait ~30 s for Neo4j to finish starting. You can verify at `http://localhost:7474` (user: `neo4j`, password: `lexgraph_dev`).
+# Start Neo4j
+docker compose up neo4j -d
+```
 
 ### 3. Backend
 
 ```bash
 cd backend
-
-# Create and activate a virtual environment
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-# Install dependencies
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# — or with Poetry —
-pip install poetry && poetry install --without training
 
-# Install spaCy language models
+# Install spaCy models
 python -m spacy download en_core_web_sm
-# Optional — Japanese NER (requires ~500 MB):
+# Optional — Japanese NER (~500 MB):
 pip install ja-ginza
 
-# Run with auto-reload (watches only source dirs, not .venv)
+# Run
 python main.py
 ```
 
-The API will be available at `http://localhost:8000`.
-Interactive docs: `http://localhost:8000/docs`
+API: `http://localhost:8000` | Docs: `http://localhost:8000/docs`
 
 ### 4. Frontend
 
 ```bash
 cd frontend
-npm install
-npm run dev
+pnpm install   # or npm install
+pnpm dev
 ```
 
 Open `http://localhost:3000`.
 
 ### 5. Log in
 
-Use the built-in development accounts:
-
 | Username | Password | Role |
 |---|---|---|
+| `admin` | `secret` | admin |
 | `attorney1` | `secret` | attorney |
 | `paralegal1` | `secret` | paralegal |
-| `admin` | `secret` | admin |
-
-> **Production:** replace the in-memory user store in `backend/api/auth/models.py` with a real database lookup and rotate `JWT_SECRET_KEY`.
 
 ---
 
 ## Docker Compose (full stack)
 
 ```bash
-cp .env.example .env   # add GEMINI_API_KEY
+cp .env.example .env   # set required vars
 docker compose up --build
 ```
-
-Services:
 
 | Service | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
-| API docs | http://localhost:8000/docs |
 | Neo4j Browser | http://localhost:7474 |
-| MinIO console | http://localhost:9001 |
+
+---
+
+## Testing
+
+```bash
+cd backend
+pip install pytest
+python -m pytest tests/ -v
+```
+
+Tests cover: Self-Router classification, structural chunker, adapter router, model factory, report formatter, RAGAS heuristic evaluator, and more.
+
+---
+
+## API Endpoints
+
+```
+Auth
+  POST  /auth/login                  Login (form body: username, password)
+  POST  /auth/refresh                Refresh access token
+  GET   /auth/me                     Current user info
+
+Chat
+  POST  /chat                        SSE streaming legal Q&A (supports force_route override)
+  GET   /chat/classify?q=...         Debug: classify query via Self-Router
+
+Documents
+  POST  /upload                      Upload PDF/DOCX for ingestion
+  POST  /ingest/{doc_id}             Trigger pgvector embedding
+
+DD Agent
+  POST  /agent/dd                    Start DD analysis (returns task_id)
+  GET   /agent/dd/{task_id}          Poll status + partial findings
+  POST  /agent/dd/{task_id}/review   Attorney approve / return
+  GET   /agent/dd/{task_id}/export   Download DD report (PDF)
+  GET   /agent/dd/models             List available LLM models
+
+Contract Review
+  POST  /agent/review                Start contract review
+  GET   /agent/review/{task_id}      Poll status + clause reviews
+  POST  /agent/review/{task_id}/approve   Attorney redlines
+  GET   /agent/review/{task_id}/export    Download redlined contract (DOCX)
+
+Knowledge Graph
+  GET   /graph/stats                 Node/relationship counts
+  GET   /graph/sample?limit=60       Subgraph for visualization
+  GET   /graph/node/{id}?hops=2      Node + N-hop neighborhood
+  GET   /graph/search?q=...          Full-text + graph search
+  GET   /graph/quality               Quality dashboard metrics (§10.6)
+  GET   /graph/integrity             Run 4 integrity checks (§10.4)
+  POST  /graph/check-amendments      Check e-Gov API for law amendments
+
+Evaluation
+  POST  /evaluate/ragas              Start RAGAS evaluation (background job)
+  GET   /evaluate/ragas/{job_id}     Poll evaluation results
+  GET   /evaluate/ragas/history/latest   Recent RAGAS scores from Supabase
+
+WebSocket
+  WS    /ws/{session_id}             Real-time task status updates
+```
 
 ---
 
@@ -162,17 +246,21 @@ Services:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | — | **Required.** Google AI Studio key |
-| `GEMINI_MODEL` | `gemini-1.5-pro` | Model ID |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `qwen3-swallow:8b` | Primary local LLM model |
+| `FINE_TUNED_MODEL` | `lexgraph-legal:latest` | Fine-tuned adapter model |
+| `JP_ADAPTER_MODEL` | `lexgraph-legal-jp:latest` | JP jurisdiction adapter |
+| `US_ADAPTER_MODEL` | `lexgraph-legal-us:latest` | US jurisdiction adapter |
 | `JWT_SECRET_KEY` | `dev-secret-...` | **Change in production** |
-| `JWT_ACCESS_EXPIRE_MINUTES` | `60` | Access token TTL |
-| `JWT_REFRESH_EXPIRE_DAYS` | `7` | Refresh token TTL |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt URI |
 | `NEO4J_USER` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | `lexgraph_dev` | Neo4j password |
-| `USE_VLLM` | `false` | Set `true` to use local LLaMA via vLLM |
-| `LLAMA_ENDPOINT` | `http://localhost:8080` | vLLM server URL |
-| `AUDIT_LOG_PATH` | `./data/audit.jsonl` | Audit log output path |
+| `SUPABASE_URL` | — | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | — | Supabase service role key |
+| `GEMINI_API_KEY` | — | Optional: Gemini for non-confidential tasks |
+| `RATE_LIMIT_REQUESTS` | `60` | Max requests per window per IP |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | Rate limit window duration |
+| `AUDIT_LOG_PATH` | `./data/audit.jsonl` | Audit log file path |
 
 ---
 
@@ -181,74 +269,84 @@ Services:
 ```
 LexGraph-Agent/
 ├── backend/
-│   ├── main.py                   # FastAPI app entry point
+│   ├── main.py                    # FastAPI entry + rate limiter
 │   ├── agents/
-│   │   ├── dd_agent.py           # LangGraph DD agent (8 nodes + human gate)
-│   │   └── review_agent.py       # LangGraph contract review agent
+│   │   ├── dd_agent.py            # LangGraph DD (8 nodes, parallel + fan-in)
+│   │   ├── review_agent.py        # LangGraph contract review (7 nodes)
+│   │   └── state.py               # Shared TypedDicts (DDState, ReviewState)
 │   ├── api/
-│   │   ├── auth/                 # JWT, bcrypt, RBAC dependencies
-│   │   ├── audit/                # Append-only JSONL audit logger
-│   │   ├── export/               # PDF (reportlab) + DOCX (python-docx) export
-│   │   └── routers/              # FastAPI routers (auth, chat, upload, agents, graph, ws)
-│   ├── graph/                    # Neo4j client, schema, Cypher queries, seed data
-│   ├── ingestion/                # PDF/DOCX pipeline, NER (spaCy), FAISS embedder
-│   ├── models/                   # Gemini LangChain adapter, vLLM client
-│   └── tools/                    # Agent tools: vector/graph search, statute lookup,
-│                                 #   risk classifier, clause segmenter, report formatter
+│   │   ├── auth/                  # JWT, bcrypt, RBAC
+│   │   ├── audit/                 # Append-only JSONL logger
+│   │   ├── export/                # PDF (reportlab) + DOCX (python-docx)
+│   │   └── routers/               # chat, upload, agent_dd, agent_review, graph, evaluate, ws, auth
+│   ├── evaluation/
+│   │   ├── ragas_evaluator.py     # LexGraphEvaluator + W&B + regression check
+│   │   └── test_cases.py          # 25 JP/US legal QA pairs
+│   ├── fine_tune/
+│   │   ├── train_lora.py          # QLoRA training (W&B integrated)
+│   │   └── export_gguf.py         # GGUF export for Ollama
+│   ├── graph/
+│   │   ├── neo4j_client.py        # Neo4j driver wrapper
+│   │   ├── schema.py              # Constraints + indexes
+│   │   ├── cypher_queries.py      # Graph RAG + integrity check queries
+│   │   ├── metadata.py            # AmendmentManager + integrity checks
+│   │   └── seed.py                # JP/US statute seed data
+│   ├── ingestion/
+│   │   ├── pipeline.py            # Upload → extract → chunk → embed
+│   │   ├── chunker.py             # Statute-aware (条/項, Section/§, Clause)
+│   │   ├── embedder.py            # multilingual-e5-large → pgvector
+│   │   └── graph_builder.py       # NER → Neo4j nodes
+│   ├── models/
+│   │   ├── model_factory.py       # Unified LLM factory (ollama/gemini/adapters)
+│   │   ├── llama_lc.py            # Ollama ChatOllama wrapper + thinking mode
+│   │   ├── adapter_router.py      # JP/US adapter auto-selection
+│   │   └── gemini_lc.py           # Gemini LangChain wrapper
+│   ├── retrieval/
+│   │   └── hybrid_retriever.py    # 4-stage: pgvector → keyword → BFS → rerank
+│   ├── tools/
+│   │   ├── self_router.py         # 5-route classifier + multi-hop regex
+│   │   ├── graph_search.py        # Neo4j subgraph search
+│   │   ├── vector_search.py       # pgvector similarity search
+│   │   ├── statute_lookup.py      # Article reference resolver
+│   │   ├── egov_monitor.py        # e-Gov API amendment checker
+│   │   └── report_formatter.py    # DD/contract report builder
+│   └── tests/                     # pytest test suites
 ├── frontend/
-│   ├── app/                      # Next.js pages (chat, dd, contract, tasks, graph, upload, login)
-│   ├── components/               # UI components (chat, dd, contract, layout)
-│   ├── context/                  # AuthContext (JWT session management)
-│   ├── hooks/                    # useChat, useDDAgent, useContractReview, useWebSocket
-│   └── lib/                      # api.ts, auth.ts, types, diff utilities
+│   ├── app/
+│   │   ├── page.tsx               # Chat (route override, model selector)
+│   │   ├── dd/page.tsx            # DD Agent (stepper + report + PDF export)
+│   │   ├── contract/page.tsx      # Contract Review (diff + DOCX export)
+│   │   ├── graph/page.tsx         # Knowledge Graph (D3 canvas)
+│   │   ├── graph/quality/page.tsx # Graph Quality Dashboard
+│   │   ├── tasks/page.tsx         # Task Dashboard
+│   │   ├── upload/page.tsx        # Document Upload
+│   │   └── login/page.tsx         # Auth
+│   ├── components/                # chat/, dd/, contract/, layout/
+│   ├── context/                   # Auth, Chat, DD, ContractReview contexts
+│   ├── hooks/                     # useContractReview, useWebSocket
+│   └── lib/                       # api.ts, types.ts, diff.ts
 ├── docker-compose.yml
-├── pyproject.toml
+├── RDD.md                         # Requirements Design Document v3.0
 └── .env.example
 ```
 
 ---
 
-## API Overview
+## Confidentiality Model
 
 ```
-POST  /auth/login              Login (form body: username, password)
-POST  /auth/refresh            Refresh access token
-GET   /auth/me                 Current user info
+Client documents (contracts, filings)
+  → MUST stay on local machine
+  → Ollama inference only (no cloud API)
+  → Supabase Storage = encrypted at rest (legal equivalent to Google Drive)
 
-POST  /chat                    SSE streaming legal Q&A
-POST  /upload                  Upload PDF/DOCX for ingestion
-POST  /ingest/{doc_id}         Trigger FAISS embedding for a document
-
-POST  /agent/dd                Start DD analysis
-GET   /agent/dd/{id}           Poll DD task status
-POST  /agent/dd/{id}/review    Attorney approve / return for re-investigation
-GET   /agent/dd/{id}/export    Download DD report as PDF
-
-POST  /agent/review            Start contract review
-GET   /agent/review/{id}       Poll review task status
-GET   /agent/review/{id}/export Download redlined contract as DOCX
-
-GET   /graph/search            Full-text + graph search
-GET   /graph/node/{id}         Node + 1-hop neighborhood
-
-WS    /ws/{session_id}         Real-time task status updates
+Public data (laws, cases, HF datasets)
+  → MAY use cloud APIs (e-Gov, HuggingFace, Gemini)
+  → Training data sourced from public datasets only
 ```
-
-All endpoints except `/auth/login` and `/health` require a `Bearer` token.
-
----
-
-## Seed Data
-
-On first startup, the backend seeds the Neo4j graph with:
-
-- **6 statutes:** 会社法, 金融商品取引法, 民法, DGCL, Securities Act 1933, Securities Exchange Act 1934
-- **10 key provisions** including fiduciary duty, insider trading, M&A approval articles
-- **4 cross-jurisdictional concept pairs** (e.g. 忠実義務 ↔ Fiduciary Duty)
 
 ---
 
 ## License
 
 MIT
-# LexGraph-Agent

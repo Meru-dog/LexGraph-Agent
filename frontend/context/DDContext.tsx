@@ -29,7 +29,7 @@ export function DDProvider({ children }: { children: ReactNode }) {
     "Our company wants to invest ¥2B in TechCorp KK. Please conduct full legal due diligence as our lawyer."
   );
   const [jurisdiction, setJurisdiction] = useState("JP+US");
-  const [modelName, setModelName] = useState("gemini");
+  const [modelName, setModelName] = useState("ollama");
   return (
     <DDContext.Provider value={{ ...dd, prompt, jurisdiction, modelName, setPrompt, setJurisdiction, setModelName }}>
       {children}

@@ -98,7 +98,7 @@ Support both Japanese and English responses.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base_model", default="NousResearch/Meta-Llama-3.1-8B-Instruct")
+    parser.add_argument("--base_model", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--adapter", default="fine_tune/adapters/lexgraph-legal")
     parser.add_argument("--output_dir", default="fine_tune/gguf")
     parser.add_argument("--quant", default="Q4_K_M")

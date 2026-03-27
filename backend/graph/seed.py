@@ -1,7 +1,10 @@
 """Neo4j seed data — Companies Act (会社法) and FIEA (金融商品取引法) statute nodes.
 
 Run once on startup if the database is empty. Idempotent (uses MERGE).
+All nodes are created with status=ACTIVE and version=1 (metadata management Phase 0).
 """
+
+import time
 
 # ─── JP Statutes ──────────────────────────────────────────────────────────────
 
@@ -194,6 +197,7 @@ def seed(client) -> dict:
         return {"skipped": True}
 
     counts = {"statutes": 0, "provisions": 0, "concepts": 0, "analogies": 0}
+    now_ms = int(time.time() * 1000)
 
     # Seed statutes
     for statute in JP_STATUTES + US_STATUTES:
@@ -204,9 +208,13 @@ def seed(client) -> dict:
                 s.title_en = $title_en,
                 s.jurisdiction = $jurisdiction,
                 s.effective_date = $effective_date,
-                s.source_url = $source_url
+                s.source_url = $source_url,
+                s.status = coalesce(s.status, 'ACTIVE'),
+                s.version = coalesce(s.version, 1),
+                s.ingested_at = coalesce(s.ingested_at, $ingested_at),
+                s.confidence = coalesce(s.confidence, 1.0)
             """,
-            statute,
+            {**statute, "ingested_at": now_ms},
         )
         counts["statutes"] += 1
 
@@ -219,12 +227,15 @@ def seed(client) -> dict:
             SET p.article_no = $article_no,
                 p.section = $section,
                 p.text = $text,
-                p.text_en = $text_en
+                p.text_en = $text_en,
+                p.status = coalesce(p.status, 'ACTIVE'),
+                p.version = coalesce(p.version, 1),
+                p.ingested_at = coalesce(p.ingested_at, $ingested_at)
             WITH p
             MATCH (s:Statute {node_id: $statute_id})
             MERGE (s)-[:HAS_PROVISION]->(p)
             """,
-            {**prov, "text_en": prov.get("text_en", ""), "statute_id": statute_id},
+            {**prov, "text_en": prov.get("text_en", ""), "statute_id": statute_id, "ingested_at": now_ms},
         )
         prov["statute_id"] = statute_id  # restore
         counts["provisions"] += 1

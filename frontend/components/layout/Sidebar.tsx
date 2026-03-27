@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/contract", label: "Contract Review", icon: "📄" },
   { href: "/tasks", label: "Tasks", icon: "📋" },
   { href: "/graph", label: "Knowledge Graph", icon: "🕸" },
+  { href: "/graph/quality", label: "Graph Quality", icon: "📊" },
   { href: "/upload", label: "Upload", icon: "⬆" },
 ];
 

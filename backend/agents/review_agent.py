@@ -19,7 +19,7 @@ from tools.graph_search import graph_search
 from tools.statute_lookup import statute_lookup
 from tools.cross_reference_checker import cross_reference_checker
 from tools.report_formatter import report_formatter
-from models.gemini_lc import get_llm
+from models.model_factory import get_llm
 
 
 def parser(state: ContractReviewState) -> dict:
@@ -40,16 +40,17 @@ def clause_classifier(state: ContractReviewState) -> dict:
 def review_loop(state: ContractReviewState) -> dict:
     """Per-clause risk scoring, issue identification, redline suggestions."""
     reviews: list[ClauseReview] = []
+    model_name = state.get("model_name", "ollama")
     for clause in state["clauses"]:
         graph_results = graph_search(
             query=clause["text"][:200],
             jurisdiction=state["jurisdiction"],
             node_types=["Statute", "Case", "LegalConcept"],
         )
-        risk = _score_clause_risk(clause, state["jurisdiction"])
-        issues = _identify_issues(clause, state["jurisdiction"])
-        redline = _generate_redline(clause, state["jurisdiction"])
-        reason = _generate_redline_reason(clause, issues, state["jurisdiction"])
+        risk = _score_clause_risk(clause, state["jurisdiction"], model_name)
+        issues = _identify_issues(clause, state["jurisdiction"], model_name)
+        redline = _generate_redline(clause, state["jurisdiction"], model_name)
+        reason = _generate_redline_reason(clause, issues, state["jurisdiction"], model_name)
         reviews.append(
             ClauseReview(
                 clause_id=clause["id"],
@@ -134,13 +135,13 @@ def redline_generator(state: ContractReviewState) -> dict:
 
 # ─── Internal helpers (mock implementations for Phase 2) ──────────────────────
 
-def _score_clause_risk(clause: Clause, jurisdiction: str) -> str:
-    """Score clause risk via Gemini, fallback to rule-based."""
+def _score_clause_risk(clause: Clause, jurisdiction: str, model_name: str = "ollama") -> str:
+    """Score clause risk via LLM, fallback to rule-based."""
     try:
-        llm = get_llm(f"You are a contract lawyer in {jurisdiction} jurisdiction.")
+        llm = get_llm(f"You are a contract lawyer in {jurisdiction} jurisdiction. Respond with one word only.", model_name, thinking=False)
         prompt = (
-            f"Rate the legal risk of this contract clause as one word: "
-            f"critical, high, medium, or low.\n\nClause: {clause['text'][:500]}\n\nRisk level:"
+            f"Rate the legal risk of this contract clause as exactly one word "
+            f"(critical, high, medium, or low).\n\nClause: {clause['text'][:500]}\n\nRisk level:"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
         level = response.content.strip().lower().split()[0]
@@ -152,12 +153,13 @@ def _score_clause_risk(clause: Clause, jurisdiction: str) -> str:
     return risk_map.get(clause.get("type", ""), "low")
 
 
-def _identify_issues(clause: Clause, jurisdiction: str) -> list[str]:
-    """Identify legal issues in a clause via Gemini, fallback to rule-based."""
+def _identify_issues(clause: Clause, jurisdiction: str, model_name: str = "ollama") -> list[str]:
+    """Identify legal issues in a clause via LLM, fallback to rule-based."""
     try:
-        llm = get_llm(f"You are a contract lawyer in {jurisdiction} jurisdiction.")
+        llm = get_llm(f"You are a contract lawyer in {jurisdiction} jurisdiction. List issues concisely, one per line.", model_name, thinking=True)
         prompt = (
-            f"List up to 3 specific legal issues with this contract clause (one per line, no bullets):\n\n"
+            f"List up to 3 specific legal issues with this contract clause. "
+            f"One issue per line, no bullets, no preamble:\n\n"
             f"Clause: {clause['text'][:600]}"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
@@ -187,8 +189,8 @@ _REDLINE_PREAMBLES = [
 ]
 
 
-def _generate_redline(clause: Clause, jurisdiction: str) -> str:
-    """Generate a redlined version of the clause via Gemini.
+def _generate_redline(clause: Clause, jurisdiction: str, model_name: str = "ollama") -> str:
+    """Generate a redlined version of the clause via LLM.
 
     Returns ONLY the rewritten clause text — no preambles or explanations.
     """
@@ -196,7 +198,9 @@ def _generate_redline(clause: Clause, jurisdiction: str) -> str:
         llm = get_llm(
             f"You are a senior contract lawyer in {jurisdiction} jurisdiction "
             f"representing the client (buyer/licensee). "
-            f"Output ONLY the rewritten clause text. Never include explanations, preambles, or commentary."
+            f"Output ONLY the rewritten clause text. Never include explanations, preambles, or commentary.",
+            model_name,
+            thinking=True,
         )
         prompt = (
             f"Rewrite this contract clause to better protect the client's interests. "
@@ -223,14 +227,16 @@ def _generate_redline(clause: Clause, jurisdiction: str) -> str:
         return clause["text"]  # Return original unchanged — don't pollute the diff
 
 
-def _generate_redline_reason(clause: Clause, issues: list[str], jurisdiction: str) -> str:
+def _generate_redline_reason(clause: Clause, issues: list[str], jurisdiction: str, model_name: str = "ollama") -> str:
     """Generate a one-sentence reason explaining why this specific clause was rewritten."""
     if not issues:
         return f"Clause rewritten to improve client protections under {jurisdiction} law."
     try:
         llm = get_llm(
             f"You are a senior contract lawyer in {jurisdiction} jurisdiction. "
-            f"Explain redline changes concisely."
+            f"Explain redline changes concisely.",
+            model_name,
+            thinking=False,
         )
         issues_text = "; ".join(issues[:2])
         prompt = (

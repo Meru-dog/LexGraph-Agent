@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from "react";
 import { streamChat } from "@/lib/api";
-import type { ChatMessage, Citation } from "@/lib/types";
+import type { ChatMessage, Citation, RouteUsed } from "@/lib/types";
 
 function generateId() {
   return Math.random().toString(36).slice(2);
@@ -30,7 +30,9 @@ interface ChatContextValue {
   error: string | null;
   jurisdiction: "JP" | "US" | "JP+US";
   setJurisdiction: (j: "JP" | "US" | "JP+US") => void;
-  sendMessage: (content: string) => void;
+  modelName: string;
+  setModelName: (m: string) => void;
+  sendMessage: (content: string, forceRoute?: string) => void;
   clearMessages: () => void;
 }
 
@@ -41,6 +43,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jurisdiction, setJurisdiction] = useState<"JP" | "US" | "JP+US">("JP");
+  const [modelName, setModelName] = useState("ollama");
 
   const sessionId = useRef(generateId());
   // Queue for messages sent while a response is streaming
@@ -48,7 +51,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const streamingRef = useRef(false);
 
   const _stream = useCallback(
-    async (content: string, currentMessages: ChatMessage[]) => {
+    async (content: string, currentMessages: ChatMessage[], forceRoute?: string) => {
       const assistantId = generateId();
       const userMsg: ChatMessage = {
         id: generateId(),
@@ -75,15 +78,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       try {
         let accumulated = "";
         let citations: Citation[] | undefined;
+        let routeUsed: RouteUsed | undefined;
+        let adapterMode: "thinking" | "non_thinking" | undefined;
 
         for await (const chunk of streamChat(
           content,
           jurisdiction,
           sessionId.current,
-          history
+          history,
+          modelName,
+          forceRoute
         )) {
           if (chunk.done) {
             if (chunk.citations) citations = chunk.citations as Citation[];
+            if (chunk.route_used) routeUsed = chunk.route_used as RouteUsed;
+            if (chunk.adapter_mode) adapterMode = chunk.adapter_mode as "thinking" | "non_thinking";
             break;
           }
           if (chunk.token) {
@@ -97,13 +106,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (citations) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, citations } : m
-            )
-          );
-        }
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, citations, route_used: routeUsed, adapter_mode: adapterMode }
+              : m
+          )
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
@@ -117,7 +126,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setStreaming(false);
       }
     },
-    [jurisdiction]
+    [jurisdiction, modelName]
   );
 
   // Process queue after each stream completes
@@ -132,12 +141,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [streaming, _stream]);
 
   const sendMessage = useCallback(
-    (content: string) => {
+    (content: string, forceRoute?: string) => {
       if (!content.trim()) return;
       if (streamingRef.current) {
-        // Queue the message to send after current stream finishes
+        // Queue the message (force_route not preserved in queue — acceptable for manual retries)
         queueRef.current.push(content.trim());
-        // Show it as a pending user message immediately
         setMessages((prev) => [
           ...prev,
           {
@@ -150,7 +158,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return;
       }
       setMessages((prev) => {
-        _stream(content.trim(), prev);
+        _stream(content.trim(), prev, forceRoute);
         return prev;
       });
     },
@@ -166,7 +174,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   return (
     <ChatContext.Provider
-      value={{ messages, streaming, error, jurisdiction, setJurisdiction, sendMessage, clearMessages }}
+      value={{ messages, streaming, error, jurisdiction, setJurisdiction, modelName, setModelName, sendMessage, clearMessages }}
     >
       {children}
     </ChatContext.Provider>

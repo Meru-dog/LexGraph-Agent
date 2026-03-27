@@ -1,6 +1,8 @@
 """Graph endpoints: GET /graph/search, GET /graph/node/{id}."""
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException
+from pydantic import BaseModel
+from typing import Optional
 
 from tools.graph_search import graph_search
 
@@ -150,6 +152,163 @@ def _mock_graph() -> dict:
         {"source": "corp_techcorp", "target": "corp_investco", "type": "RELATED_TO"},
     ]
     return {"nodes": nodes, "relationships": rels, "connected": False}
+
+
+@router.get("/quality")
+async def graph_quality():
+    """Graph quality dashboard metrics (RDD §10.6).
+
+    Returns:
+      node_counts        — total + by-label breakdown
+      archived_ratio     — fraction of ARCHIVED nodes
+      orphaned_count     — nodes with no edges
+      unverified_count   — nodes where last_verified > 90 days ago
+      unverified_nodes   — sample of those nodes (node_id, law_name, last_verified)
+      stale_laws         — law_name + last_verified for Statute nodes (sorted oldest first)
+    """
+    try:
+        from graph.neo4j_client import neo4j_client
+        if not neo4j_client._driver:
+            return {"connected": False}
+        with neo4j_client._driver.session() as session:
+            # Total + ARCHIVED counts
+            totals = session.run(
+                "MATCH (n) RETURN count(n) AS total, "
+                "sum(CASE WHEN n.status = 'ARCHIVED' THEN 1 ELSE 0 END) AS archived"
+            ).single()
+            total = totals["total"] or 0
+            archived = totals["archived"] or 0
+            archived_ratio = round(archived / total, 4) if total else 0.0
+
+            # By-label breakdown (ACTIVE only)
+            label_rows = list(session.run(
+                """
+                MATCH (n)
+                WHERE n.status IS NULL OR n.status = 'ACTIVE'
+                UNWIND labels(n) AS lbl
+                RETURN lbl, count(*) AS c
+                ORDER BY c DESC
+                """
+            ))
+            by_label = {r["lbl"]: r["c"] for r in label_rows}
+
+            # Orphaned node count
+            orphaned = session.run(
+                "MATCH (n) WHERE NOT (n)--() RETURN count(n) AS c"
+            ).single()["c"]
+
+            # Unverified nodes (last_verified > 90 days ago or null)
+            unverified_rows = list(session.run(
+                """
+                MATCH (n)
+                WHERE n.status IS NULL OR n.status = 'ACTIVE'
+                AND (
+                    n.last_verified IS NULL
+                    OR date(n.last_verified) < date() - duration({days: 90})
+                )
+                RETURN n.node_id AS node_id, n.law_name AS law_name,
+                       n.last_verified AS last_verified,
+                       labels(n) AS node_labels
+                ORDER BY n.last_verified ASC
+                LIMIT 20
+                """
+            ))
+            unverified_nodes = [
+                {
+                    "node_id": r["node_id"],
+                    "law_name": r["law_name"],
+                    "last_verified": r["last_verified"],
+                    "labels": list(r["node_labels"]),
+                }
+                for r in unverified_rows
+            ]
+            unverified_count = session.run(
+                """
+                MATCH (n)
+                WHERE (n.status IS NULL OR n.status = 'ACTIVE')
+                AND (
+                    n.last_verified IS NULL
+                    OR date(n.last_verified) < date() - duration({days: 90})
+                )
+                RETURN count(n) AS c
+                """
+            ).single()["c"]
+
+            # Statute nodes sorted by last_verified (stale laws list)
+            stale_rows = list(session.run(
+                """
+                MATCH (n:Statute)
+                WHERE n.status IS NULL OR n.status = 'ACTIVE'
+                RETURN n.node_id AS node_id, n.name AS name,
+                       n.last_verified AS last_verified,
+                       n.jurisdiction AS jurisdiction
+                ORDER BY n.last_verified ASC
+                LIMIT 10
+                """
+            ))
+            stale_laws = [
+                {
+                    "node_id": r["node_id"],
+                    "name": r["name"],
+                    "last_verified": r["last_verified"],
+                    "jurisdiction": r["jurisdiction"],
+                }
+                for r in stale_rows
+            ]
+
+        return {
+            "connected": True,
+            "total_nodes": total,
+            "archived_nodes": archived,
+            "archived_ratio": archived_ratio,
+            "active_by_label": by_label,
+            "orphaned_count": orphaned,
+            "unverified_count": unverified_count,
+            "unverified_nodes": unverified_nodes,
+            "stale_laws": stale_laws,
+        }
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+@router.get("/integrity")
+async def graph_integrity():
+    """Run all four metadata integrity checks from RDD §10.4.
+
+    Returns a summary dict with errors/warnings counts and per-check results.
+    """
+    try:
+        from graph.neo4j_client import neo4j_client
+        from graph.metadata import run_all_integrity_checks
+        return run_all_integrity_checks(neo4j_client)
+    except Exception as e:
+        return {"skipped": True, "reason": str(e)}
+
+
+class AmendmentCheckRequest(BaseModel):
+    law_ids: Optional[list[str]] = None   # None → check all TRACKED_LAWS
+    since_date: Optional[str] = None      # ISO date, default = 90 days ago
+    auto_archive: bool = False            # If True, archive amended nodes in Neo4j
+
+
+@router.post("/check-amendments")
+async def check_amendments(request: AmendmentCheckRequest, background_tasks: BackgroundTasks):
+    """Check e-Gov API for law amendments (RDD §10.3 / Phase 6).
+
+    Triggers a live query to https://laws.e-gov.go.jp for tracked laws.
+    If auto_archive=True, archives amended Neo4j nodes in the background.
+    """
+    try:
+        from tools.egov_monitor import check_amendments as _check
+        result = _check(law_ids=request.law_ids, since_date=request.since_date)
+
+        if request.auto_archive and result.get("amended_count", 0) > 0:
+            from tools.egov_monitor import archive_amended_nodes
+            background_tasks.add_task(archive_amended_nodes, result)
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/search")

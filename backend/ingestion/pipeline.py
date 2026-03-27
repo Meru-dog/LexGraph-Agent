@@ -5,7 +5,7 @@ Steps:
     2. Chunking (512 tokens, 64 overlap)
     3. NER extraction (spaCy ja_ginza + en_core_web_trf)
     4. Graph node creation (neo4j-driver)
-    5. Embedding indexing (multilingual-e5-large → FAISS)
+    5. Embedding indexing (multilingual-e5-large → Supabase pgvector)
 """
 
 import io
@@ -22,10 +22,11 @@ def run(
     doc_id: str,
     document_type: str,
     filename: Optional[str] = None,
+    jurisdiction: str = "",
 ) -> dict:
     """Execute full ingestion pipeline for a document."""
     text = _extract_text(content, filename)
-    chunks = chunk_text(text, doc_id)
+    chunks = chunk_text(text, doc_id, document_type=document_type, jurisdiction=jurisdiction)
     entities = extract_entities(text)
     graph_result = build_graph_nodes(
         chunks=chunks,

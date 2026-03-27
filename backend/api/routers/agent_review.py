@@ -21,6 +21,7 @@ class ReviewRequest(BaseModel):
     jurisdiction: str = "US"
     contract_type: str = "other"
     client_position: str = "buyer"
+    model_name: str = "ollama"
 
 
 class ApproveRequest(BaseModel):
@@ -39,6 +40,7 @@ def _run_review_agent(task_id: str, raw_contract: str, request: ReviewRequest) -
             "jurisdiction": request.jurisdiction,
             "contract_type": request.contract_type,
             "client_position": request.client_position,
+            "model_name": request.model_name,
             "clauses": [],
             "clause_reviews": [],
             "inconsistencies": [],

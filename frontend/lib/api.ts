@@ -41,12 +41,22 @@ export async function* streamChat(
   query: string,
   jurisdiction: string,
   sessionId: string,
-  history: { role: string; content: string }[]
+  history: { role: string; content: string }[],
+  modelName: string = "ollama",
+  forceRoute?: string
 ): AsyncGenerator<{ token?: string; done?: boolean; citations?: unknown[] }> {
+  const body: Record<string, unknown> = {
+    query,
+    jurisdiction,
+    session_id: sessionId,
+    history,
+    model_name: modelName,
+  };
+  if (forceRoute) body.force_route = forceRoute;
   const res = await fetch(`${BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ query, jurisdiction, session_id: sessionId, history }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) throw new Error(`Chat request failed: ${res.status}`);
@@ -113,7 +123,7 @@ export async function startDDAgent(payload: {
 
 export async function getAvailableModels(): Promise<{ id: string; name: string; type: string; available: boolean }[]> {
   const res = await fetch(`${BASE_URL}/agent/dd/models`, { headers: authHeaders() });
-  if (!res.ok) return [{ id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", available: true }];
+  if (!res.ok) return [{ id: "ollama", name: "Qwen3 Swallow 8B", type: "local", available: false }];
   return res.json();
 }
 
@@ -140,6 +150,7 @@ export async function startContractReview(payload: {
   jurisdiction: string;
   contract_type: string;
   client_position: string;
+  model_name?: string;
 }) {
   const res = await fetch(`${BASE_URL}/agent/review`, {
     method: "POST",

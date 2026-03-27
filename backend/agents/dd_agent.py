@@ -36,9 +36,12 @@ from models.model_factory import get_llm as _factory_get_llm
 
 
 def get_llm_for_state(state: DDState, system_prompt: str = "You are a senior M&A legal counsel in JP/US jurisdiction."):
-    """Select LLM based on model_name stored in state."""
-    model_name = state.get("model_name", "gemini") if isinstance(state, dict) else "gemini"
-    return _factory_get_llm(system_prompt=system_prompt, model=model_name)
+    """Select LLM based on model_name stored in state.
+
+    Agents always run in Thinking mode — complex multi-step reasoning requires it.
+    """
+    model_name = state.get("model_name", "ollama") if isinstance(state, dict) else "ollama"
+    return _factory_get_llm(system_prompt=system_prompt, model=model_name, thinking=True)
 
 
 def scope_planner(state: DDState) -> dict:
@@ -116,7 +119,7 @@ def _analyze_disclosure_with_llm(
                 f"You are a senior M&A attorney conducting due diligence in {jurisdiction} jurisdiction. "
                 f"Analyze financial disclosures for legal and business risks."
             ),
-            model=state.get("model_name", "gemini") if isinstance(state, dict) else "gemini",
+            model=state.get("model_name", "ollama") if isinstance(state, dict) else "ollama",
         )
         prompt = (
             f"Analyze this {doc_type} disclosure for {target}. "
@@ -590,7 +593,7 @@ def risk_synthesizer(state: DDState) -> dict:
     try:
         llm = _factory_get_llm(
             system_prompt="You are a senior M&A legal counsel synthesizing due diligence findings.",
-            model=state.get("model_name", "gemini") if isinstance(state, dict) else "gemini",
+            model=state.get("model_name", "ollama") if isinstance(state, dict) else "ollama",
         )
         findings_text = "\n".join(
             f"- [{f['status'].upper()}] {f['text']}" for f in all_findings
@@ -649,7 +652,7 @@ def report_generator(state: DDState) -> dict:
     try:
         llm = _factory_get_llm(
             system_prompt="You are a senior M&A counsel writing a due diligence report recommendation.",
-            model=state.get("model_name", "gemini") if isinstance(state, dict) else "gemini",
+            model=state.get("model_name", "ollama") if isinstance(state, dict) else "ollama",
         )
         risk_matrix = state.get("risk_matrix", {})
         risk_summary = {k: len(v) for k, v in risk_matrix.items()}

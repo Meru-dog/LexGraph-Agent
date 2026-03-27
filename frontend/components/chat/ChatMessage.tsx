@@ -1,4 +1,4 @@
-import type { ChatMessage as ChatMessageType } from "@/lib/types";
+import type { ChatMessage as ChatMessageType, RouteUsed } from "@/lib/types";
 
 interface Props {
   message: ChatMessageType;
@@ -45,6 +45,21 @@ export default function ChatMessage({ message }: Props) {
         {/* Render markdown-style bold */}
         <MessageContent content={message.content} />
 
+        {/* Route indicator + adapter mode */}
+        {message.route_used && (
+          <div className="mt-2 flex items-center gap-1.5">
+            <RouteBadge route={message.route_used} />
+            {message.adapter_mode === "thinking" && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}
+              >
+                thinking
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Citations */}
         {message.citations && message.citations.length > 0 && (
           <div className="mt-3 pt-3 border-t border-[#F3F4F6]">
@@ -71,6 +86,26 @@ export default function ChatMessage({ message }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+const ROUTE_META: Record<RouteUsed, { label: string; bg: string; color: string; border: string }> = {
+  dd_agent:       { label: "DD Agent",       bg: "#FFF7ED", color: "#9A3412", border: "#FED7AA" },
+  contract_agent: { label: "Contract Agent", bg: "#F0FDF4", color: "#15803D", border: "#BBF7D0" },
+  graph_rag:      { label: "Graph RAG",      bg: "#EEF2FF", color: "#4338CA", border: "#C7D2FA" },
+  vector_rag:     { label: "Vector RAG",     bg: "#F5F3FF", color: "#6D28D9", border: "#DDD6FE" },
+  direct_answer:  { label: "Direct",         bg: "#F9FAFB", color: "#6B7280", border: "#E5E7EB" },
+};
+
+function RouteBadge({ route }: { route: RouteUsed }) {
+  const meta = ROUTE_META[route];
+  return (
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+      style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.border}` }}
+    >
+      {meta.label}
+    </span>
   );
 }
 

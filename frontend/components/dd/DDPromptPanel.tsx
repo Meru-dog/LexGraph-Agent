@@ -61,7 +61,7 @@ export default function DDPromptPanel({
   const isDone = isComplete || isError;
 
   const [models, setModels] = useState<ModelOption[]>([
-    { id: "gemini", name: "Gemini 2.5 Flash", type: "cloud", available: true },
+    { id: "ollama", name: "Qwen3 Swallow 8B", type: "local", available: false },
   ]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 

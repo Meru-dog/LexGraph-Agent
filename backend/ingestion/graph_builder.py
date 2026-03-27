@@ -1,5 +1,6 @@
 """graph_builder — create Document, Chunk, and Entity nodes in Neo4j."""
 
+import time
 from typing import List, Optional
 
 
@@ -35,15 +36,20 @@ def build_graph_nodes(
 
 
 def _write_to_neo4j(client, chunks, entities, doc_id, document_type, filename):
+    now_ms = int(time.time() * 1000)
+
     # Upsert Document node
     client.run_query(
         """
         MERGE (d:Document {doc_id: $doc_id})
         SET d.document_type = $document_type,
             d.filename = $filename,
-            d.created_at = timestamp()
+            d.created_at = timestamp(),
+            d.status = coalesce(d.status, 'ACTIVE'),
+            d.version = coalesce(d.version, 1),
+            d.ingested_at = $ingested_at
         """,
-        {"doc_id": doc_id, "document_type": document_type, "filename": filename or ""},
+        {"doc_id": doc_id, "document_type": document_type, "filename": filename or "", "ingested_at": now_ms},
     )
 
     # Upsert Chunk nodes + CHUNK_OF edges
@@ -54,7 +60,9 @@ def _write_to_neo4j(client, chunks, entities, doc_id, document_type, filename):
             SET c.doc_id = $doc_id,
                 c.text = $text,
                 c.chunk_index = $chunk_index,
-                c.jurisdiction = $jurisdiction
+                c.jurisdiction = $jurisdiction,
+                c.status = coalesce(c.status, 'ACTIVE'),
+                c.ingested_at = $ingested_at
             WITH c
             MATCH (d:Document {doc_id: $doc_id})
             MERGE (c)-[:CHUNK_OF]->(d)
@@ -65,6 +73,7 @@ def _write_to_neo4j(client, chunks, entities, doc_id, document_type, filename):
                 "text": chunk.get("text", ""),
                 "chunk_index": chunk.get("chunk_index", 0),
                 "jurisdiction": chunk.get("jurisdiction", ""),
+                "ingested_at": now_ms,
             },
         )
 

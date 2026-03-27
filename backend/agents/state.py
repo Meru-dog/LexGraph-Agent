@@ -4,6 +4,20 @@ from typing import TypedDict, List, Dict, Optional
 from langchain_core.messages import BaseMessage
 
 
+# ─── Graph node metadata ───────────────────────────────────────────────────────
+
+class NodeMetadata(TypedDict, total=False):
+    status: str            # "ACTIVE" | "ARCHIVED" | "DRAFT"
+    version: int
+    effective_date: str    # YYYY-MM-DD
+    amended_date: str
+    expiry_date: str
+    superseded_by: str     # node_id of replacement
+    ingested_at: int       # epoch ms
+    last_verified: int     # epoch ms
+    confidence: float      # 0.0–1.0
+
+
 # ─── DD Agent ─────────────────────────────────────────────────────────────────
 
 
@@ -36,7 +50,7 @@ class DDState(TypedDict):
     jurisdiction: str           # "JP" | "US" | "both"
     documents: List[dict]
     prompt: str
-    model_name: str             # "gemini" | "llama" | "fine_tuned"
+    model_name: str             # "ollama" | "fine_tuned" | "gemini"
 
     # Planning
     dd_checklist: List[dict]
@@ -102,6 +116,7 @@ class ContractReviewState(TypedDict):
     jurisdiction: str
     contract_type: str
     client_position: str
+    model_name: str             # "ollama" | "fine_tuned" | "gemini"
 
     # Parsing
     clauses: List[Clause]

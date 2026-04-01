@@ -1,11 +1,12 @@
 # LexGraph AI — 要件定義書
 
-> **バージョン:** 3.0
+> **バージョン:** 3.1
 > **作成日:** 2026年3月
-> **ステータス:** 実装準備完了
+> **更新日:** 2026年4月
+> **ステータス:** 実装完了
 > **実装ツール:** Claude Code
 > **機密区分:** 社内限定
-> **変更点（v2.0→v3.0）:** ファインチューニング方針をコスト最適化型に改訂・W&B統合を追加
+> **変更点（v3.0→v3.1）:** §12.1 ベースモデルをQwen2.5-1.5B-Instructに更新・Mac MPS対応を明記、§12.5 学習コードを実装済みtrain_lora.pyに刷新、§13.2 evaluate_finetune.pyによるFT前後比較の追記、§21 リポジトリ構成をfine_tune/の実構造に更新
 
 ---
 
@@ -1018,12 +1019,16 @@ class LexGraphEvaluator:
 ### 12.1 QLoRA設定
 
 ```
-ベースモデル:
-  JP adapter: tokyotech-llm/Swallow-8b-hf
-              （Qwen3 Swallow 8B RL の前身・HuggingFace公開済み）
-  US adapter: meta-llama/Llama-3.1-8B
+ベースモデル（実装済み）:
+  デフォルト: Qwen/Qwen2.5-1.5B-Instruct
+              （多言語JP/EN対応・約3GB・Mac MPS動作確認済み・非ゲーテッド）
+  代替（高性能）: NousResearch/Meta-Llama-3.1-8B-Instruct
+                  （より多くのRAMが必要）
 
-量子化方式: QLoRA（4bit NF4 + LoRAアダプター）
+量子化方式:
+  Mac MPS / CPU: float16（bitsandbytesはApple Silicon非対応のため4-bit不使用）
+  CUDA (A100等): QLoRA（4bit NF4 + LoRAアダプター）も利用可
+
 LoRA設定:
   rank (r):      16
   alpha:         32  （alpha/r = 2 が標準）
@@ -1032,10 +1037,12 @@ LoRA設定:
 
 学習フレームワーク:
   HuggingFace transformers + peft + trl (SFTTrainer)
+  デバイス自動検出: MPS（Apple Silicon）> CUDA > CPU
 
 ハードウェア:
-  テスト: Google Colab Pro+（A100 40GB・月$10程度）
-  本番:   Vertex AI Custom Job A100 40GB（Bootcampクレジット消費）
+  ローカル開発: Mac Apple Silicon（MPS・float16）
+  テスト:       Google Colab Pro+（A100 40GB・月$10程度）
+  本番:         Vertex AI Custom Job A100 40GB（Bootcampクレジット消費）
   推定学習時間: 1アダプターあたり60〜90分
   推定学習コスト: 1回あたり約¥800（A100）
 ```
@@ -1072,75 +1079,50 @@ LoRA設定:
 }
 ```
 
-### 12.5 学習パイプライン（Colab / Vertex AI共通コード）
+### 12.5 学習パイプライン（`backend/fine_tune/train_lora.py`）
+
+```bash
+# 基本実行（Mac MPS / CPU）
+python fine_tune/train_lora.py \
+    --base_model Qwen/Qwen2.5-1.5B-Instruct \
+    --data_path  fine_tune/data/legal_qa.jsonl \
+    --adapter    JP \
+    --epochs     3
+
+# RAGAS評価付き（学習前後の品質差分をW&Bに記録）
+python fine_tune/train_lora.py \
+    --base_model Qwen/Qwen2.5-1.5B-Instruct \
+    --adapter JP --eval_ragas
+```
 
 ```python
-import os
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer, SFTConfig
-import wandb
-
-# ① W&B初期化（学習開始前）
+# W&B 自動ログの概要（train_lora.py より抜粋）
 wandb.init(
     project="lexgraph-finetune",
-    name=f"swallow-8b-jp-r16-{run_id}",
+    name=f"{base_model}-{adapter}-r{lora_rank}-{timestamp}",
     config={
-        "base_model":  "tokyotech-llm/Swallow-8b-hf",
-        "adapter":     "JP",
-        "lora_rank":   16,
-        "lora_alpha":  32,
-        "epochs":      3,
-        "batch_size":  4,
-        "lr":          2e-4,
-        "data_count":  1800,
-    }
+        "base_model": base_model, "adapter": adapter,
+        "lora_rank": lora_rank, "lora_alpha": lora_alpha,
+        "epochs": epochs, "lr": learning_rate,
+        "device": device,   # mps / cuda / cpu
+    },
 )
 
-# ② QLoRA設定
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    "tokyotech-llm/Swallow-8b-hf",
-    quantization_config=bnb_config,
-    device_map="auto",
-)
-model = prepare_model_for_kbit_training(model)
+# SFTTrainer → report_to="wandb" で損失・LR・grad_normを自動ログ
+# 学習後のサマリー
+wandb.summary["train_loss"]        = train_result.training_loss
+wandb.summary["train_runtime_sec"] = ...
+wandb.summary["samples_per_sec"]   = ...
 
-# ③ LoRA設定
-lora_config = LoraConfig(
-    r=16, lora_alpha=32, lora_dropout=0.05,
-    target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-    bias="none", task_type="CAUSAL_LM",
-)
-model = get_peft_model(model, lora_config)
+# --eval_ragas 時: 学習前後のRAGASスコアを記録
+wandb.log({"eval/before/faithfulness": ..., "eval/after/faithfulness": ...})
+wandb.summary["faithfulness_delta"]   = after - before
+wandb.summary["faithfulness_improved"] = delta > 0
 
-# ④ 学習実行（W&Bへ自動ログ）
-output_dir = os.environ.get("OUTPUT_DIR", "./adapter_jp")  # Vertex AIはGCSパス
-trainer = SFTTrainer(
-    model=model,
-    train_dataset=jp_dataset,
-    args=SFTConfig(
-        output_dir=output_dir,
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
-        learning_rate=2e-4,
-        save_strategy="epoch",
-        logging_steps=10,
-        report_to="wandb",      # ← W&Bへ自動ログ（この1行だけ）
-        fp16=True,
-        max_seq_length=1024,
-        dataset_text_field="text",
-    ),
-)
-trainer.train()
-trainer.save_model(output_dir)
-wandb.finish()
+# LoRAアダプターをArtifactとして保存
+artifact = wandb.Artifact("lexgraph-adapter-jp", type="model")
+artifact.add_dir(output_dir)
+run.log_artifact(artifact)
 ```
 
 ### 12.6 ColabからVertex AIへの移行
@@ -1185,61 +1167,55 @@ wandb project: lexgraph-rag
   → 失敗クエリの可視化（W&B Tables）
 ```
 
-### 13.2 RAG実験管理
+### 13.2 RAG実験管理（`backend/evaluation/ragas_evaluator.py`）
 
 Graph RAGパイプラインの変更（検索手法・チャンクサイズ・グラフホップ数等）の効果をW&Bで定量追跡する。
 
-```python
-import wandb
-from ragas import evaluate
-
-class LexGraphEvaluator:
-
-    async def run_and_log(self, pipeline_config: dict):
-        """
-        RAGパイプラインの変更効果をW&Bに記録する
-        """
-        run = wandb.init(
-            project="lexgraph-rag",
-            name=f"ragas-{pipeline_config['version']}",
-            config={
-                "retriever":        pipeline_config["retriever"],
-                "reranker":         pipeline_config["reranker"],
-                "graph_hops":       pipeline_config["graph_hops"],
-                "chunk_size":       pipeline_config["chunk_size"],
-                "top_k":            pipeline_config["top_k"],
-                "llm_model":        "qwen3-swallow-8b",
-                "adapter":          pipeline_config.get("adapter", "none"),
-            }
-        )
-
-        # RAGAS評価実行
-        scores = await self.evaluate_pipeline()
-
-        # スコアをW&Bにログ
-        wandb.log({
-            "ragas/faithfulness":       scores["faithfulness"],
-            "ragas/answer_relevancy":   scores["answer_relevancy"],
-            "ragas/context_precision":  scores["context_precision"],
-            "ragas/context_recall":     scores["context_recall"],
-        })
-
-        # 失敗ケースをW&B Tableで可視化
-        failure_table = wandb.Table(
-            columns=["question", "answer", "faithfulness", "retrieved_context", "issue"]
-        )
-        for case in scores.failed_cases:
-            failure_table.add_data(
-                case.question, case.answer,
-                case.faithfulness, case.contexts[:200], case.issue
-            )
-        wandb.log({"failures": failure_table})
-
-        # 回帰テスト（前回比で5%以上劣化したら警告）
-        self._regression_check(scores)
-        wandb.finish()
-        return scores
+```bash
+# RAGAS評価を実行してW&B lexgraph-rag プロジェクトに記録
+python -c "
+from evaluation.ragas_evaluator import LexGraphEvaluator
+LexGraphEvaluator(pipeline_version='v1', use_wandb=True).run()
+"
 ```
+
+W&Bに記録される内容（`lexgraph-rag` プロジェクト）:
+
+| メトリクス | 説明 |
+|---|---|
+| `ragas/faithfulness` | 回答がコンテキストに根拠を持つ割合 |
+| `ragas/answer_relevancy` | 回答が質問に答えている割合 |
+| `ragas/context_precision` | 検索チャンクの有用率 |
+| `ragas/context_recall` | ground truthがコンテキストに含まれる割合 |
+| `ragas/jp/*` / `ragas/us/*` | 管轄別ブレークダウン |
+| `ragas/all_cases` (Table) | 全25件の質問・回答・スコア一覧 |
+| `ragas/failures` (Table) | Faithfulness < 0.6 の失敗ケース詳細 |
+| `ragas/target/faithfulness_pass` | 目標値（0.75）達成フラグ |
+
+回帰チェック: Faithfulnessが前回比5%超下落した場合は `ValueError` を発生させる。
+
+### 13.2.1 ファインチューニング前後比較（`backend/fine_tune/evaluate_finetune.py`）
+
+ベースモデルとファインチューニング済みモデルを同一条件でRAGAS評価し、改善効果を1つのW&Bランに記録する。
+
+```bash
+python fine_tune/evaluate_finetune.py \
+    --base_model      qwen2.5:1.5b \
+    --finetuned_model lexgraph-legal \
+    --version         v1
+```
+
+W&Bに記録される内容（`lexgraph-finetune` プロジェクト・`job_type=eval-compare`）:
+
+| メトリクス | 説明 |
+|---|---|
+| `base/faithfulness` 等 | ベースモデルの4指標 |
+| `finetuned/faithfulness` 等 | FTモデルの4指標 |
+| `delta/faithfulness` 等 | 差分（プラスが改善） |
+| `compare/summary` (Table) | 全指標の base / finetuned / delta 一覧 |
+| `compare/base_cases` (Table) | ベースモデルの全件スコア |
+| `compare/finetuned_cases` (Table) | FTモデルの全件スコア |
+| `finetuned_passes_target` | Faithfulness≥0.75 AND Relevancy≥0.70 のフラグ |
 
 ### 13.3 実験比較の例（W&Bで可視化する内容）
 
@@ -1911,22 +1887,18 @@ lexgraph-ai/
 │   │   ├── integrity_check.py         # 整合性チェッククエリ（4種）
 │   │   └── egov_client.py             # e-Gov API差分監視
 │   ├── evaluation/
-│   │   ├── ragas_evaluator.py         # LexGraphEvaluator + W&Bログ
-│   │   └── test_dataset.py            # RAGASテストセット管理
+│   │   ├── ragas_evaluator.py         # LexGraphEvaluator + W&Bログ（lexgraph-rag）
+│   │   └── test_cases.py              # 25件 JP/US legal QAペア（RAGASテストセット）
 │   └── models/
 │       ├── ollama_client.py           # Qwen3 Swallow（Thinking/Non-thinking切替）
 │       ├── adapter_router.py          # JP/USアダプター選択
 │       └── embedding_client.py        # multilingual-e5-large
 │
-├── training/                          # ファインチューニングパイプライン（Phase 4）
-│   ├── datasets/
-│   │   ├── us_loader.py               # CUAD / LegalBench / CaseHOLD等の取得・変換
-│   │   ├── jp_loader.py               # JLawText / JCourts / e-Gov等の取得・変換
-│   │   └── format_instructions.py     # Instruction形式への統一変換
-│   ├── finetune_us.py                 # US adapter QLoRA学習（W&B自動ログ）
-│   ├── finetune_jp.py                 # JP adapter QLoRA学習（W&B自動ログ）
-│   ├── evaluate_adapters.py           # COLIEE / LexGLUE評価 + W&Bログ
-│   └── wandb_config.py                # W&Bプロジェクト設定・共通ユーティリティ
+├── fine_tune/                         # ファインチューニングパイプライン
+│   ├── train_lora.py                  # QLoRA学習（W&B自動ログ・MPS/CUDA/CPU対応）
+│   ├── export_gguf.py                 # LoRAマージ → GGUF変換 → Ollama Modelfile生成
+│   ├── evaluate_finetune.py           # ベース vs FTモデルのRAGAS比較（W&B記録）
+│   └── generate_training_data.py      # 学習データ生成
 │
 ├── supabase/
 │   └── migrations/
@@ -1944,4 +1916,4 @@ lexgraph-ai/
 
 ---
 
-*Document Control: v3.0 — 2026年3月。Claude Codeを使って実装すること。ファインチューニングはコスト最適化型で実施（W&Bで管理）。機密文書は外部LLM APIに送信しないこと。*
+*Document Control: v3.1 — 2026年4月更新。Claude Codeを使って実装すること。ファインチューニングはコスト最適化型で実施（W&Bで管理）。機密文書は外部LLM APIに送信しないこと。*

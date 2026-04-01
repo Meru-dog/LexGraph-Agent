@@ -35,6 +35,25 @@ def export(
     except ImportError as e:
         raise SystemExit(f"Missing deps: {e}\nRun: pip install transformers peft")
 
+    # ── W&B run ───────────────────────────────────────────────────────────────
+    _wandb_run = None
+    try:
+        import wandb, time
+        _wandb_run = wandb.init(
+            project="lexgraph-finetune",
+            job_type="export",
+            name=f"export-gguf-{quant}-{int(time.time())}",
+            config={
+                "base_model":   base_model,
+                "adapter_dir":  adapter_dir,
+                "quant":        quant,
+                "llama_cpp_dir": llama_cpp_dir,
+            },
+        )
+        print(f"[wandb] Export run: {_wandb_run.url}")
+    except Exception as e:
+        print(f"[wandb] init skipped (non-fatal): {e}")
+
     os.makedirs(output_dir, exist_ok=True)
     merged_dir = os.path.join(output_dir, "merged")
 
@@ -94,6 +113,34 @@ Support both Japanese and English responses.
     print(f"\nTo import into Ollama:")
     print(f"  ollama create lexgraph-legal -f {modelfile_path}")
     print(f"  ollama run lexgraph-legal")
+
+    # ── W&B: log GGUF artifact + file size metrics ────────────────────────────
+    if _wandb_run:
+        try:
+            import wandb
+            gguf_size_mb = round(os.path.getsize(final_gguf) / 1e6, 1) if os.path.exists(final_gguf) else 0
+            wandb.log({
+                "export/gguf_size_mb": gguf_size_mb,
+                "export/quantized":    final_gguf == quant_path,
+            })
+            artifact = wandb.Artifact(
+                name="lexgraph-gguf",
+                type="model",
+                description=f"GGUF export ({quant}) of {base_model} + LoRA adapter",
+                metadata={
+                    "base_model":   base_model,
+                    "quant":        quant,
+                    "gguf_size_mb": gguf_size_mb,
+                    "adapter_dir":  adapter_dir,
+                },
+            )
+            artifact.add_file(final_gguf)
+            artifact.add_file(modelfile_path)
+            _wandb_run.log_artifact(artifact)
+            _wandb_run.finish()
+            print(f"[wandb] GGUF artifact logged ({gguf_size_mb} MB)")
+        except Exception as e:
+            print(f"[wandb] artifact log error (non-fatal): {e}")
 
 
 if __name__ == "__main__":

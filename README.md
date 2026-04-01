@@ -284,7 +284,9 @@ LexGraph-Agent/
 │   │   └── test_cases.py          # 25 JP/US legal QA pairs
 │   ├── fine_tune/
 │   │   ├── train_lora.py          # QLoRA training (W&B integrated)
-│   │   └── export_gguf.py         # GGUF export for Ollama
+│   │   ├── export_gguf.py         # GGUF export for Ollama
+│   │   ├── evaluate_finetune.py   # Base vs fine-tuned RAGAS comparison (W&B)
+│   │   └── generate_training_data.py  # Training data generation
 │   ├── graph/
 │   │   ├── neo4j_client.py        # Neo4j driver wrapper
 │   │   ├── schema.py              # Constraints + indexes
@@ -329,6 +331,33 @@ LexGraph-Agent/
 ├── RDD.md                         # Requirements Design Document v3.0
 └── .env.example
 ```
+
+---
+
+## W&B Monitoring
+
+Two W&B projects track experiments. Setup: `pip install wandb && wandb login`
+
+### `lexgraph-rag` — RAG quality
+
+```bash
+cd backend
+python -c "from evaluation.ragas_evaluator import LexGraphEvaluator; LexGraphEvaluator(pipeline_version='v1', use_wandb=True).run()"
+```
+
+Logs: 4 RAGAS metrics, JP/US breakdown, per-case table, failure cases, regression check (fails if Faithfulness drops >5%).
+
+### `lexgraph-finetune` — Fine-tuning
+
+```bash
+# Train (logs loss curve, LR, grad norm, adapter artifact)
+python fine_tune/train_lora.py --base_model Qwen/Qwen2.5-1.5B-Instruct --adapter JP --eval_ragas
+
+# Compare base vs fine-tuned (logs delta metrics + side-by-side table)
+python fine_tune/evaluate_finetune.py --base_model qwen2.5:1.5b --finetuned_model lexgraph-legal --version v1
+```
+
+Key metrics: `train/loss`, `delta/faithfulness`, `finetuned_passes_target`, `compare/summary` table.
 
 ---
 

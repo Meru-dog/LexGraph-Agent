@@ -17,6 +17,9 @@ from pydantic import BaseModel
 from tools.jurisdiction_router import jurisdiction_router
 from tools.self_router import route_query, get_retrieval_strategy, log_route
 from retrieval.hybrid_retriever import hybrid_search
+from models.langchain_message_text import extract_message_text
+from models.llama_lc import OLLAMA_MODEL, FINE_TUNED_MODEL
+from models.adapter_router import JP_ADAPTER_MODEL, US_ADAPTER_MODEL
 
 router = APIRouter(tags=["chat"])
 
@@ -188,14 +191,26 @@ async def _ollama_stream(
                 msgs.append(AIMessage(content=msg["content"]))
         msgs.append(HumanMessage(content=full_prompt))
 
-        # Thinking mode tokens (/think, /no_think) only work on Qwen3-series models
-        _is_qwen3 = "qwen3" in (model_name or "").lower()
+        # Frontend sends model_name "ollama" — resolve env Ollama tag for Qwen3 heuristics
+        _mn = (model_name or "").lower()
+        if _mn in ("ollama", "llama"):
+            _tag = OLLAMA_MODEL.lower()
+        elif _mn == "fine_tuned":
+            _tag = FINE_TUNED_MODEL.lower()
+        elif _mn == "jp_adapter":
+            _tag = JP_ADAPTER_MODEL.lower()
+        elif _mn == "us_adapter":
+            _tag = US_ADAPTER_MODEL.lower()
+        else:
+            _tag = _mn
+        _is_qwen3 = "qwen3" in _tag
         if _is_qwen3:
             msgs = apply_thinking_mode(msgs, thinking)
 
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, lambda: llm.invoke(msgs))
-        yield f"data: {json.dumps({'token': response.content})}\n\n"
+        out_text = extract_message_text(response)
+        yield f"data: {json.dumps({'token': out_text})}\n\n"
 
     except RuntimeError as e:
         yield f"data: {json.dumps({'token': f'[Ollama error: {e}]'})}\n\n"

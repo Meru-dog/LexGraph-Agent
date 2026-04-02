@@ -1,5 +1,24 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+/** Ensure SSE `token` is a string (LangChain may emit block arrays). */
+function normalizeChatToken(token: unknown): string {
+  if (token == null) return "";
+  if (typeof token === "string") return token;
+  if (Array.isArray(token)) {
+    return token
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "text" in item) {
+          return String((item as { text?: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+  if (typeof token === "object") return JSON.stringify(token);
+  return String(token);
+}
+
 function authHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token = localStorage.getItem("lexgraph_access_token");
@@ -74,7 +93,15 @@ export async function* streamChat(
     for (const line of lines) {
       if (line.startsWith("data: ")) {
         try {
-          yield JSON.parse(line.slice(6));
+          const parsed = JSON.parse(line.slice(6)) as {
+            token?: unknown;
+            done?: boolean;
+            citations?: unknown[];
+          };
+          if (parsed.token !== undefined && parsed.token !== null) {
+            parsed.token = normalizeChatToken(parsed.token);
+          }
+          yield parsed;
         } catch {
           // ignore malformed SSE lines
         }

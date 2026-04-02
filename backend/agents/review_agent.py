@@ -20,6 +20,7 @@ from tools.statute_lookup import statute_lookup
 from tools.cross_reference_checker import cross_reference_checker
 from tools.report_formatter import report_formatter
 from models.model_factory import get_llm
+from models.langchain_message_text import extract_message_text
 
 
 def parser(state: ContractReviewState) -> dict:
@@ -144,7 +145,7 @@ def _score_clause_risk(clause: Clause, jurisdiction: str, model_name: str = "oll
             f"(critical, high, medium, or low).\n\nClause: {clause['text'][:500]}\n\nRisk level:"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        level = response.content.strip().lower().split()[0]
+        level = extract_message_text(response).strip().lower().split()[0]
         if level in ("critical", "high", "medium", "low"):
             return level
     except Exception:
@@ -163,7 +164,7 @@ def _identify_issues(clause: Clause, jurisdiction: str, model_name: str = "ollam
             f"Clause: {clause['text'][:600]}"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        issues = [line.strip() for line in response.content.strip().split("\n") if line.strip()]
+        issues = [line.strip() for line in extract_message_text(response).strip().split("\n") if line.strip()]
         return issues[:3]
     except Exception:
         pass
@@ -209,7 +210,7 @@ def _generate_redline(clause: Clause, jurisdiction: str, model_name: str = "olla
             f"Start directly with the rewritten clause text:\n\n{clause['text']}"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        text = response.content.strip()
+        text = extract_message_text(response).strip()
 
         # Strip common Gemini preambles (case-insensitive)
         lower = text.lower()
@@ -246,7 +247,7 @@ def _generate_redline_reason(clause: Clause, issues: list[str], jurisdiction: st
             f"Start with 'Rewritten to...' or 'Modified to...'"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        reason = response.content.strip()
+        reason = extract_message_text(response).strip()
         # Ensure single sentence
         reason = reason.split("\n")[0].split(". ")[0]
         if reason and not reason.endswith("."):

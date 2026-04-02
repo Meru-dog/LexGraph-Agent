@@ -111,6 +111,7 @@ def get_adapter_llm(
         repeat_penalty=1.15,
         top_k=40,
         top_p=0.9,
+        reasoning=False,
     )
     llm._thinking = thinking          # type: ignore[attr-defined]
     llm._adapter_type = adapter_type  # type: ignore[attr-defined]

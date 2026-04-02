@@ -67,6 +67,9 @@ def get_llama_llm(
 
     # Thinking mode appends /think to user messages at invocation time.
     # Stored on the instance so callers can inspect it.
+    # reasoning=False: avoid Ollama splitting answer into reasoning_content with empty
+    # main body (common with Qwen3 / Swallow on some Ollama builds). We use /think
+    # suffix via apply_thinking_mode in chat when needed.
     llm = ChatOllama(
         model=model_name,
         base_url=OLLAMA_BASE_URL,
@@ -76,6 +79,7 @@ def get_llama_llm(
         repeat_penalty=1.15,
         top_k=40,
         top_p=0.9,
+        reasoning=False,
     )
     # Attach thinking flag for use by _apply_thinking_mode helper
     llm._thinking = thinking  # type: ignore[attr-defined]

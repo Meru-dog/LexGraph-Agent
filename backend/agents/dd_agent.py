@@ -33,6 +33,7 @@ from tools.report_formatter import report_formatter
 from tools.edinet_search import search_disclosures as edinet_search, fetch_document_text as edinet_fetch
 from tools.edgar_search import search_filings as edgar_search, fetch_filing_text as edgar_fetch
 from models.model_factory import get_llm as _factory_get_llm
+from models.langchain_message_text import extract_message_text
 
 
 def get_llm_for_state(state: DDState, system_prompt: str = "You are a senior M&A legal counsel in JP/US jurisdiction."):
@@ -61,7 +62,7 @@ def scope_planner(state: DDState) -> dict:
             f"Instruction: {state['prompt']}\n\nRespond with ONLY valid JSON."
         )
         response = llm.invoke([HumanMessage(content=extraction_prompt)])
-        json_match = re.search(r"\{.*?\}", response.content, re.DOTALL)
+        json_match = re.search(r"\{.*?\}", extract_message_text(response), re.DOTALL)
         if json_match:
             extracted = json.loads(json_match.group())
             target_entity = extracted.get("target_entity", "")
@@ -129,7 +130,7 @@ def _analyze_disclosure_with_llm(
             f"Disclosure excerpt:\n{text[:2000]}"
         )
         response = llm.invoke([HumanMessage(content=prompt)])
-        return response.content.strip()
+        return extract_message_text(response).strip()
     except Exception:
         return ""
 
@@ -606,7 +607,7 @@ def risk_synthesizer(state: DDState) -> dict:
         )
         response = llm.invoke([HumanMessage(content=synthesis_prompt)])
         import json, re
-        json_match = re.search(r"\{.*\}", response.content, re.DOTALL)
+        json_match = re.search(r"\{.*\}", extract_message_text(response), re.DOTALL)
         if json_match:
             synthesized = json.loads(json_match.group())
             risk_matrix: dict = {"critical": [], "high": [], "medium": [], "low": []}
@@ -667,7 +668,7 @@ def report_generator(state: DDState) -> dict:
             f"Data sources used: EDINET, SEC EDGAR, internal knowledge graph."
         )
         response = llm.invoke([HumanMessage(content=rec_prompt)])
-        recommendation = response.content.strip()
+        recommendation = extract_message_text(response).strip()
     except Exception:
         pass
 

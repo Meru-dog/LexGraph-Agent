@@ -18,6 +18,7 @@ W&B integration (RDD §13):
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -87,6 +88,7 @@ class LexGraphEvaluator:
         from retrieval.hybrid_retriever import hybrid_search
         from models.model_factory import get_llm
         from models.llama_lc import apply_thinking_mode
+        from models.langchain_message_text import extract_message_text
         from langchain_core.messages import HumanMessage
         from api.routers.chat import _SYSTEM_JP, _SYSTEM_US, _SYSTEM_JPUS
 
@@ -120,7 +122,7 @@ class LexGraphEvaluator:
                 llm = get_llm(system, model="ollama", thinking=False)
                 msgs = apply_thinking_mode([HumanMessage(content=prompt)], thinking=False)
                 response = llm.invoke(msgs)
-                answer = response.content.strip()
+                answer = extract_message_text(response).strip()
             except Exception as e:
                 answer = f"[generation error: {e}]"
                 print(f"[ragas] Case {i+1} generation error: {e}")
@@ -147,6 +149,8 @@ class LexGraphEvaluator:
             return self._heuristic_evaluate(dataset)
         except Exception as e:
             print(f"[ragas] evaluation error: {e} — using heuristic fallback")
+            import traceback
+            traceback.print_exc()
             return self._heuristic_evaluate(dataset)
 
     def _ragas_evaluate(self, dataset: list[dict]) -> dict:
@@ -158,6 +162,7 @@ class LexGraphEvaluator:
             context_precision,
             context_recall,
         )
+        from ragas.utils import safe_nanmean
 
         hf_dataset = Dataset.from_list(dataset)
 
@@ -166,7 +171,7 @@ class LexGraphEvaluator:
             from langchain_community.embeddings import OllamaEmbeddings
             llm = Ollama(model=os.getenv("OLLAMA_MODEL", "qwen3-swallow:8b"))
             embeddings = OllamaEmbeddings(model="nomic-embed-text")
-            scores = evaluate(
+            result = evaluate(
                 hf_dataset,
                 metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
                 llm=llm,
@@ -174,17 +179,26 @@ class LexGraphEvaluator:
             )
         else:
             # Public data only — external LLM allowed
-            scores = evaluate(
+            result = evaluate(
                 hf_dataset,
                 metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
             )
 
+        # RAGAS 0.4+: evaluate() returns EvaluationResult; result["faithfulness"] is a
+        # list of per-row scores, not a scalar. float(list) raises TypeError and used to
+        # force silent fallback to heuristic (zeros / empty raw in W&B).
+        def _mean(metric_key: str) -> float:
+            v = safe_nanmean(result[metric_key])
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                return 0.0
+            return float(v)
+
         return {
-            "faithfulness":       float(scores["faithfulness"]),
-            "answer_relevancy":   float(scores["answer_relevancy"]),
-            "context_precision":  float(scores["context_precision"]),
-            "context_recall":     float(scores["context_recall"]),
-            "raw":                scores.to_pandas().to_dict(orient="records"),
+            "faithfulness":       _mean("faithfulness"),
+            "answer_relevancy":   _mean("answer_relevancy"),
+            "context_precision":  _mean("context_precision"),
+            "context_recall":     _mean("context_recall"),
+            "raw":                result.to_pandas().to_dict(orient="records"),
         }
 
     def _heuristic_evaluate(self, dataset: list[dict]) -> dict:

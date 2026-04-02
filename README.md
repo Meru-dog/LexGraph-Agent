@@ -368,6 +368,7 @@ python eval_ragas.py --eval-data eval_data/sample_eval.json
 ```
 
 `eval_ragas.py` uses Gemini for RAGAS evaluation LLM/embeddings. Set `GEMINI_API_KEY` in `backend/.env` before running.
+If your account/model access differs, set `GEMINI_EMBEDDING_MODEL` (default: `models/embedding-001`).
 
 `backend/eval_ragas.py` reads JSON entries in this format:
 

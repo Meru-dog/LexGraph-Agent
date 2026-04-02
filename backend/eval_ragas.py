@@ -21,6 +21,13 @@ import wandb
 from datasets import Dataset
 from dotenv import load_dotenv
 from ragas import evaluate
+from ragas.metrics import (
+    answer_relevancy,
+    context_precision,
+    context_recall,
+    faithfulness,
+)
+from ragas.utils import safe_nanmean
 
 
 DEFAULT_PROJECT = "lexgraph-rag"
@@ -155,15 +162,33 @@ def main() -> None:
     )
 
     llm, embeddings = _build_gemini_clients()
-    result = evaluate(dataset=dataset, llm=llm, embeddings=embeddings)
+    result = evaluate(
+        dataset=dataset,
+        llm=llm,
+        embeddings=embeddings,
+        metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+    )
     print("RAGAS result:", result)
 
-    scores: dict[str, float] = {}
-    for key, value in result.items():
+    # RAGAS 0.4+ returns EvaluationResult, not dict.
+    def _mean(metric_key: str) -> float:
+        value = safe_nanmean(result[metric_key])
+        if value is None:
+            return 0.0
         try:
-            scores[f"ragas/{key}"] = float(value)
-        except Exception:
-            print(f"skip key={key}, value={value}")
+            f = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if f != f:  # NaN guard
+            return 0.0
+        return f
+
+    scores: dict[str, float] = {
+        "ragas/faithfulness": _mean("faithfulness"),
+        "ragas/answer_relevancy": _mean("answer_relevancy"),
+        "ragas/context_precision": _mean("context_precision"),
+        "ragas/context_recall": _mean("context_recall"),
+    }
 
     print("scores to wandb:", scores)
     run.log(scores)
@@ -190,7 +215,7 @@ def _build_gemini_clients():
         temperature=0.0,
     )
     embeddings = GoogleGenerativeAIEmbeddings(
-        model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004"),
+        model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/embedding-001"),
         google_api_key=api_key,
     )
     return llm, embeddings

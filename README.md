@@ -336,7 +336,26 @@ LexGraph-Agent/
 
 ## W&B Monitoring
 
-Two W&B projects track experiments. Setup: `pip install wandb && wandb login`
+Two W&B projects track experiments.
+
+### 0) One-time setup (required for correct RAGAS → W&B logging)
+
+```bash
+cd backend
+pip install -r requirements.txt
+wandb login
+```
+
+Recommended `.env` for evaluation runs:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3-swallow:8b
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+```
+
+If W&B is not needed for a run, set `use_wandb=false` in the API request (see below).
 
 ### `lexgraph-rag` — RAG quality
 
@@ -346,6 +365,18 @@ python -c "from evaluation.ragas_evaluator import LexGraphEvaluator; LexGraphEva
 ```
 
 Logs: 4 RAGAS metrics, JP/US breakdown, per-case table, failure cases, regression check (fails if Faithfulness drops >5%).
+
+API alternative (same evaluator, async job):
+
+```bash
+# Start evaluation job
+curl -X POST http://localhost:8000/evaluate/ragas \
+  -H "Content-Type: application/json" \
+  -d '{"pipeline_version":"v1","use_local_llm":true,"use_wandb":true}'
+
+# Poll status
+curl http://localhost:8000/evaluate/ragas/<job_id>
+```
 
 ### `lexgraph-finetune` — Fine-tuning
 
@@ -358,6 +389,13 @@ python fine_tune/evaluate_finetune.py --base_model qwen2.5:1.5b --finetuned_mode
 ```
 
 Key metrics: `train/loss`, `delta/faithfulness`, `finetuned_passes_target`, `compare/summary` table.
+
+Troubleshooting:
+
+- If metrics are all zeros, confirm Ollama is running and `OLLAMA_MODEL` is available.
+- If Ollama logs show `POST /api/chat 404`, the configured `OLLAMA_MODEL` is not installed on your machine; run `ollama pull <model>` or change `OLLAMA_MODEL` in `.env`.
+- If W&B logs are missing, re-run `wandb login` in the same shell/session.
+- If Supabase history endpoint is empty, check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 ---
 

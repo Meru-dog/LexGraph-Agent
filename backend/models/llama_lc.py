@@ -29,6 +29,52 @@ FINE_TUNED_MODEL = os.getenv("FINE_TUNED_MODEL", "lexgraph-legal:latest")
 LLAMA_MODEL = OLLAMA_MODEL
 
 
+def _pick_existing_ollama_model(preferred: str) -> str:
+    """Return a runnable Ollama model name, falling back when preferred is missing.
+
+    Some environments return HTTP 404 on /api/chat when the requested model tag does
+    not exist locally. To avoid hard failure from a stale default in .env, we choose:
+      1) preferred model if installed
+      2) first installed model from a short priority list
+      3) first model returned by /api/tags
+    """
+    models = list_available_models()
+    if not models:
+        return preferred
+
+    installed = [m["name"] for m in models if m.get("name")]
+    installed_set = set(installed)
+    preferred_base = preferred.split(":")[0]
+
+    # Exact tag match first, then base-name match (e.g. qwen3-swallow:*).
+    if preferred in installed_set:
+        return preferred
+    for name in installed:
+        if name.split(":")[0] == preferred_base:
+            return name
+
+    priority = [
+        "qwen3-swallow:8b",
+        "qwen2.5:7b",
+        "llama3.1:8b",
+        "llama3.2:3b",
+    ]
+    for candidate in priority:
+        if candidate in installed_set:
+            print(
+                f"[ollama] configured model '{preferred}' not found; "
+                f"falling back to '{candidate}'."
+            )
+            return candidate
+
+    fallback = installed[0]
+    print(
+        f"[ollama] configured model '{preferred}' not found; "
+        f"falling back to installed model '{fallback}'."
+    )
+    return fallback
+
+
 def is_ollama_available() -> bool:
     """Check if Ollama server is running."""
     import urllib.request
@@ -63,7 +109,8 @@ def get_llama_llm(
 
     from langchain_ollama import ChatOllama
 
-    model_name = FINE_TUNED_MODEL if use_fine_tuned else OLLAMA_MODEL
+    requested_model = FINE_TUNED_MODEL if use_fine_tuned else OLLAMA_MODEL
+    model_name = _pick_existing_ollama_model(requested_model)
 
     # Thinking mode appends /think to user messages at invocation time.
     # Stored on the instance so callers can inspect it.

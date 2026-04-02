@@ -53,6 +53,7 @@ class LexGraphEvaluator:
         self,
         test_cases: Optional[list] = None,
         baseline: Optional[dict] = None,
+        use_rag: bool = True,
     ) -> dict:
         """Run RAGAS evaluation and return score dict.
 
@@ -64,11 +65,12 @@ class LexGraphEvaluator:
         cases = test_cases or TEST_CASES
         print(f"[ragas] Running evaluation on {len(cases)} test cases...")
 
-        dataset = self._generate_answers(cases)
+        dataset = self._generate_answers(cases, use_rag=use_rag)
         scores = self._evaluate(dataset)
         scores["evaluated_at"] = datetime.now(timezone.utc).isoformat()
         scores["pipeline_version"] = self.pipeline_version
         scores["test_count"] = len(cases)
+        scores["use_rag"] = use_rag
 
         self._save_scores(scores)
 
@@ -83,38 +85,52 @@ class LexGraphEvaluator:
 
     # ── Answer generation ─────────────────────────────────────────────────────
 
-    def _generate_answers(self, cases: list) -> list[dict]:
+    def _generate_answers(self, cases: Optional[list], use_rag: bool = True) -> list[dict]:
         """For each test case, retrieve context and generate an answer via Ollama."""
-        from retrieval.hybrid_retriever import hybrid_search
         from models.model_factory import get_llm
         from models.llama_lc import apply_thinking_mode
         from models.langchain_message_text import extract_message_text
         from langchain_core.messages import HumanMessage
-        from api.routers.chat import _SYSTEM_JP, _SYSTEM_US, _SYSTEM_JPUS
+        from api.routers.chat import _SYSTEM_JP, _SYSTEM_US
 
+        if use_rag:
+            from retrieval.hybrid_retriever import hybrid_search
+
+        cases = cases or TEST_CASES
         dataset = []
         for i, case in enumerate(cases):
             question = case["question"]
             ground_truth = case["ground_truth"]
             jurisdiction = case.get("jurisdiction", "JP")
+            provided_contexts = case.get("contexts", []) or case.get("gold_contexts", [])
 
-            # Retrieve context
-            retrieved = hybrid_search(
-                question, jurisdiction, top_k=5,
-                use_graph=True, use_vector=True,
-            )
-            contexts = [r["text"] for r in retrieved if r.get("text")]
+            contexts = []
+            if use_rag:
+                retrieved = hybrid_search(
+                    question, jurisdiction, top_k=5,
+                    use_graph=True, use_vector=True,
+                )
+                contexts = [r["text"] for r in retrieved if r.get("text")]
+            elif provided_contexts:
+                contexts = [str(c) for c in provided_contexts if str(c).strip()]
 
             # Build prompt
             system = _SYSTEM_JP if jurisdiction == "JP" else _SYSTEM_US
-            context_block = "\n\n".join(
-                f"[参照 {j+1}]: {ctx[:400]}" for j, ctx in enumerate(contexts[:4])
-            )
-            prompt = (
-                f"Legal question: {question}\n\n"
-                f"---\n参照情報:\n{context_block}\n\n"
-                f"Please provide a concise, citation-grounded answer."
-            )
+            if use_rag and contexts:
+                context_block = "\n\n".join(
+                    f"[参照 {j+1}]: {ctx[:400]}" for j, ctx in enumerate(contexts[:4])
+                )
+                prompt = (
+                    f"Legal question: {question}\n\n"
+                    f"---\n参照情報:\n{context_block}\n\n"
+                    f"Please provide a concise, citation-grounded answer."
+                )
+            else:
+                prompt = (
+                    f"Legal question: {question}\n\n"
+                    "Answer from your legal reasoning only. "
+                    "If uncertain, state assumptions and avoid overconfident claims."
+                )
 
             # Generate answer
             answer = ""

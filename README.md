@@ -359,6 +359,37 @@ If W&B is not needed for a run, set `use_wandb=false` in the API request (see be
 
 ### `lexgraph-rag` — RAG quality
 
+Beginner-friendly local JSON evaluation (separate from backend startup):
+
+```bash
+cd backend
+mkdir -p eval_data
+python eval_ragas.py --eval-data eval_data/sample_eval.json
+```
+
+`eval_ragas.py` uses Gemini for RAGAS evaluation LLM/embeddings. Set `GEMINI_API_KEY` in `backend/.env` before running.
+If your account/model access differs, set `GEMINI_EMBEDDING_MODEL` (default: `models/embedding-001`).
+
+`backend/eval_ragas.py` reads JSON entries in this format:
+
+```json
+[
+  {
+    "question": "質問文",
+    "contexts": ["根拠テキスト1", "根拠テキスト2"],
+    "reference": "模範回答"
+  }
+]
+```
+
+When your real answer function is ready, pass it with `--generator module:function`:
+
+```bash
+python eval_ragas.py --generator your_module:generate_answer
+```
+
+You should see `RAGAS result:` and `scores to wandb:` in terminal output, then the run in W&B (`job_type=eval`).
+
 ```bash
 cd backend
 python -c "from evaluation.ragas_evaluator import LexGraphEvaluator; LexGraphEvaluator(pipeline_version='v1', use_wandb=True).run()"

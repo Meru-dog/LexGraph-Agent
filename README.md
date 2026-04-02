@@ -415,11 +415,24 @@ curl http://localhost:8000/evaluate/ragas/<job_id>
 # Train (logs loss curve, LR, grad norm, adapter artifact)
 python fine_tune/train_lora.py --base_model Qwen/Qwen2.5-1.5B-Instruct --adapter JP --eval_ragas
 
-# Compare base vs fine-tuned (logs delta metrics + side-by-side table)
-python fine_tune/evaluate_finetune.py --base_model qwen2.5:1.5b --finetuned_model lexgraph-legal --version v1
+# Build evaluation set (custom test cases + optional Hugging Face samples)
+python -m evaluation.build_eval_dataset --max_examples 120 --include_hf --output eval_data/legal_eval_4way.json
+
+# 4-way comparison (A/B/C/D): base/ft × no-RAG/RAG
+python fine_tune/evaluate_finetune.py \
+  --base_model qwen2.5:1.5b \
+  --finetuned_model lexgraph-legal \
+  --eval_dataset eval_data/legal_eval_4way.json \
+  --max_examples 8 \
+  --ragas_timeout_sec 180 \
+  --ragas_max_workers 1 \
+  --version v2
 ```
 
-Key metrics: `train/loss`, `delta/faithfulness`, `finetuned_passes_target`, `compare/summary` table.
+Key metrics: `train/loss`, condition metrics (`A_base_no_rag/*` ... `D_ft_rag/*`),
+and decomposition deltas (`delta/ft_effect_no_rag/*`, `delta/rag_effect_base/*`, etc.).
+
+Recommended rollout to avoid timeout storms: 8 → 20 → 40 → full dataset.
 
 Troubleshooting:
 

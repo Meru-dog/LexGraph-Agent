@@ -275,9 +275,10 @@ class LexGraphEvaluator:
         """Log RAGAS scores, per-case table, and jurisdiction breakdown to W&B."""
         try:
             import wandb
-            wandb.init(
+            run = wandb.init(
                 project="lexgraph-rag",
                 name=f"ragas-{self.pipeline_version}-{int(time.time())}",
+                job_type="eval",
                 config={
                     "pipeline_version": self.pipeline_version,
                     "retriever":        "hybrid (vector+keyword+graph+crossencoder)",
@@ -290,9 +291,10 @@ class LexGraphEvaluator:
                 },
                 reinit=True,
             )
+            print(f"[ragas] about to log to W&B: {scores}")
 
             # ── Aggregate metrics ─────────────────────────────────────────────
-            wandb.log({
+            run.log({
                 "ragas/faithfulness":      scores.get("faithfulness", 0),
                 "ragas/answer_relevancy":  scores.get("answer_relevancy", 0),
                 "ragas/context_precision": scores.get("context_precision", 0),
@@ -300,14 +302,14 @@ class LexGraphEvaluator:
             })
 
             # ── Target pass / fail ────────────────────────────────────────────
-            wandb.log({
+            run.log({
                 "ragas/target/faithfulness_pass":
                     int(scores.get("faithfulness", 0) >= FAITHFULNESS_TARGET),
                 "ragas/target/answer_relevancy_pass":
                     int(scores.get("answer_relevancy", 0) >= ANSWER_RELEVANCY_TARGET),
             })
-            wandb.summary["faithfulness_target"] = FAITHFULNESS_TARGET
-            wandb.summary["answer_relevancy_target"] = ANSWER_RELEVANCY_TARGET
+            run.summary["faithfulness_target"] = FAITHFULNESS_TARGET
+            run.summary["answer_relevancy_target"] = ANSWER_RELEVANCY_TARGET
 
             raw = scores.get("raw", [])
             if raw:
@@ -328,7 +330,7 @@ class LexGraphEvaluator:
                         case.get("jurisdiction", ""),
                         faith >= FAITHFULNESS_TARGET,
                     )
-                wandb.log({"ragas/all_cases": all_table})
+                run.log({"ragas/all_cases": all_table})
 
                 # ── Failure cases table ───────────────────────────────────────
                 fail_table = wandb.Table(columns=[
@@ -343,7 +345,7 @@ class LexGraphEvaluator:
                             (case["contexts"][0][:200] if case["contexts"] else ""),
                             case.get("jurisdiction", ""),
                         )
-                wandb.log({"ragas/failures": fail_table})
+                run.log({"ragas/failures": fail_table})
 
                 # ── Jurisdiction breakdown ────────────────────────────────────
                 def _avg_metric(pairs, metric):
@@ -353,14 +355,14 @@ class LexGraphEvaluator:
                 jp = [(r, c) for r, c in zip(raw, dataset) if c.get("jurisdiction") == "JP"]
                 us = [(r, c) for r, c in zip(raw, dataset) if c.get("jurisdiction") == "US"]
                 if jp:
-                    wandb.log({
+                    run.log({
                         "ragas/jp/faithfulness":      _avg_metric(jp, "faithfulness"),
                         "ragas/jp/answer_relevancy":  _avg_metric(jp, "answer_relevancy"),
                         "ragas/jp/context_precision": _avg_metric(jp, "context_precision"),
                         "ragas/jp/context_recall":    _avg_metric(jp, "context_recall"),
                     })
                 if us:
-                    wandb.log({
+                    run.log({
                         "ragas/us/faithfulness":      _avg_metric(us, "faithfulness"),
                         "ragas/us/answer_relevancy":  _avg_metric(us, "answer_relevancy"),
                         "ragas/us/context_precision": _avg_metric(us, "context_precision"),
@@ -383,11 +385,11 @@ class LexGraphEvaluator:
                         f.write(_json.dumps(case, ensure_ascii=False) + "\n")
                     tmp_path = f.name
                 artifact.add_file(tmp_path, name="test_cases.jsonl")
-                wandb.log_artifact(artifact)
+                run.log_artifact(artifact)
             except Exception as e:
                 print(f"[ragas] artifact log error (non-fatal): {e}")
 
-            wandb.finish()
+            run.finish()
             print("[ragas] W&B run logged to project 'lexgraph-rag'")
         except ImportError:
             print("[ragas] wandb not installed — W&B logging skipped")

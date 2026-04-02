@@ -104,6 +104,7 @@ class ChatRequest(BaseModel):
     history: list[dict] = []
     model_name: str = "ollama"   # Ollama (Qwen3 Swallow) is the default
     force_route: str | None = None  # Override self-router: "dd_agent"|"contract_agent"|"graph_rag"|"vector_rag"|"direct_answer"
+    run_ragas_eval: bool = False  # Optional: trigger RAGAS+W&B evaluation after answering
 
 
 async def _ollama_stream(
@@ -112,6 +113,7 @@ async def _ollama_stream(
     history: list[dict],
     model_name: str,
     force_route: str | None = None,
+    run_ragas_eval: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Stream Qwen3 Swallow (or fine-tuned) response as SSE events.
 
@@ -232,6 +234,8 @@ async def _ollama_stream(
         if r.get("law_name") or r.get("article_no")
     ]
     yield f"data: {json.dumps({'done': True, 'citations': citations, 'route_used': route, 'adapter_mode': 'thinking' if thinking else 'non_thinking', 'latency_ms': latency_ms})}\n\n"
+    if run_ragas_eval:
+        asyncio.create_task(_run_ragas_eval_job(detected_jur))
 
 
 async def _gemini_stream(
@@ -332,9 +336,37 @@ async def chat(request: ChatRequest):
         stream_gen = _ollama_stream(
             request.query, request.jurisdiction, request.history, request.model_name,
             force_route=request.force_route,
+            run_ragas_eval=request.run_ragas_eval,
         )
     return StreamingResponse(
         stream_gen,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def _run_ragas_eval_job(jurisdiction: str) -> None:
+    """Run RAGAS evaluation asynchronously from chat flow (explicit opt-in)."""
+    try:
+        from evaluation.ragas_evaluator import LexGraphEvaluator
+        from evaluation.test_cases import TEST_CASES
+
+        cases = (
+            [c for c in TEST_CASES if c.get("jurisdiction") == jurisdiction]
+            if jurisdiction in {"JP", "US"}
+            else TEST_CASES
+        )
+        if not cases:
+            print(f"[chat/eval] skipped: no cases for jurisdiction={jurisdiction}")
+            return
+
+        evaluator = LexGraphEvaluator(
+            use_local_llm=True,
+            pipeline_version=f"chat-{jurisdiction.lower()}",
+            use_wandb=True,
+        )
+        loop = asyncio.get_event_loop()
+        scores = await loop.run_in_executor(None, evaluator.run, cases)
+        print(f"[chat/eval] completed: {scores}")
+    except Exception as e:
+        print(f"[chat/eval] failed: {e}")

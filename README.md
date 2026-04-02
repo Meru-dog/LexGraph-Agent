@@ -393,6 +393,7 @@ Key metrics: `train/loss`, `delta/faithfulness`, `finetuned_passes_target`, `com
 Troubleshooting:
 
 - If metrics are all zeros, confirm Ollama is running and `OLLAMA_MODEL` is available.
+- If Ollama logs show `POST /api/chat 404`, the configured `OLLAMA_MODEL` is not installed on your machine; run `ollama pull <model>` or change `OLLAMA_MODEL` in `.env`.
 - If W&B logs are missing, re-run `wandb login` in the same shell/session.
 - If Supabase history endpoint is empty, check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 

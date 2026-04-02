@@ -8,7 +8,7 @@ Evaluates 4 metrics:
 
 Confidentiality compliance:
   All evaluation is run with local Ollama (Qwen3 Swallow) by default.
-  External LLMs (OpenAI) may be used ONLY for public test data.
+  External LLMs (Gemini) may be used ONLY for public test data.
 
 W&B integration (RDD §13):
   Results are logged to wandb project "lexgraph-rag".
@@ -179,9 +179,12 @@ class LexGraphEvaluator:
             )
         else:
             # Public data only — external LLM allowed
+            llm, embeddings = _build_gemini_clients()
             result = evaluate(
                 hf_dataset,
                 metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+                llm=llm,
+                embeddings=embeddings,
             )
 
         # RAGAS 0.4+: evaluate() returns EvaluationResult; result["faithfulness"] is a
@@ -433,3 +436,33 @@ def _print_score_table(scores: dict) -> None:
     if scores.get("note"):
         print(f"  Note:       {scores['note']}")
     print("─" * 52 + "\n")
+
+
+def _build_gemini_clients():
+    """Build Gemini LLM + embeddings for RAGAS.
+
+    We intentionally avoid OpenAI defaults to keep the external evaluator
+    provider aligned with project settings (`GEMINI_API_KEY` in .env).
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise ValueError(
+            "GEMINI_API_KEY is not set. Add it to backend/.env before running "
+            "evaluation with use_local_llm=False."
+        )
+
+    from langchain_google_genai import (
+        ChatGoogleGenerativeAI,
+        GoogleGenerativeAIEmbeddings,
+    )
+
+    llm = ChatGoogleGenerativeAI(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        google_api_key=api_key,
+        temperature=0.0,
+    )
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004"),
+        google_api_key=api_key,
+    )
+    return llm, embeddings

@@ -19,6 +19,7 @@ from typing import Callable
 
 import wandb
 from datasets import Dataset
+from dotenv import load_dotenv
 from ragas import evaluate
 
 
@@ -71,6 +72,8 @@ def _validate_item(item: dict, index: int) -> None:
 
 
 def main() -> None:
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Run RAGAS evaluation from local JSON and log to W&B."
     )
@@ -151,7 +154,8 @@ def main() -> None:
         }
     )
 
-    result = evaluate(dataset=dataset)
+    llm, embeddings = _build_gemini_clients()
+    result = evaluate(dataset=dataset, llm=llm, embeddings=embeddings)
     print("RAGAS result:", result)
 
     scores: dict[str, float] = {}
@@ -165,6 +169,31 @@ def main() -> None:
     run.log(scores)
     run.summary.update(scores)
     run.finish()
+
+
+def _build_gemini_clients():
+    """Use Gemini as the external evaluator model via GEMINI_API_KEY."""
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        raise ValueError(
+            "GEMINI_API_KEY が未設定です。.env に設定してから実行してください。"
+        )
+
+    from langchain_google_genai import (
+        ChatGoogleGenerativeAI,
+        GoogleGenerativeAIEmbeddings,
+    )
+
+    llm = ChatGoogleGenerativeAI(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        google_api_key=api_key,
+        temperature=0.0,
+    )
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model=os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004"),
+        google_api_key=api_key,
+    )
+    return llm, embeddings
 
 
 if __name__ == "__main__":

@@ -423,11 +423,16 @@ python fine_tune/evaluate_finetune.py \
   --base_model qwen2.5:1.5b \
   --finetuned_model lexgraph-legal \
   --eval_dataset eval_data/legal_eval_4way.json \
+  --max_examples 8 \
+  --ragas_timeout_sec 180 \
+  --ragas_max_workers 1 \
   --version v2
 ```
 
 Key metrics: `train/loss`, condition metrics (`A_base_no_rag/*` ... `D_ft_rag/*`),
 and decomposition deltas (`delta/ft_effect_no_rag/*`, `delta/rag_effect_base/*`, etc.).
+
+Recommended rollout to avoid timeout storms: 8 → 20 → 40 → full dataset.
 
 Troubleshooting:
 

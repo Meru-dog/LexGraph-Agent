@@ -11,6 +11,9 @@ Usage:
         --base_model qwen2.5:1.5b \
         --finetuned_model lexgraph-legal \
         --eval_dataset ../eval_data/legal_eval_4way.json \
+        --max_examples 8 \
+        --ragas_timeout_sec 180 \
+        --ragas_max_workers 1 \
         --version v2
 """
 
@@ -32,7 +35,9 @@ FAITHFULNESS_TARGET = 0.75
 ANSWER_RELEVANCY_TARGET = 0.70
 
 
-def _load_cases(eval_dataset: str | None) -> list[dict] | None:
+def _load_cases(eval_dataset: str | None, max_examples: int | None, seed: int) -> list[dict] | None:
+    import random
+
     if not eval_dataset:
         return None
     p = Path(eval_dataset)
@@ -41,10 +46,20 @@ def _load_cases(eval_dataset: str | None) -> list[dict] | None:
     rows = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(rows, list) or not rows:
         raise SystemExit("eval dataset must be a non-empty JSON list")
+    if max_examples and len(rows) > max_examples:
+        random.Random(seed).shuffle(rows)
+        rows = rows[:max_examples]
     return rows
 
 
-def _eval_model(model_name: str, pipeline_version: str, use_rag: bool, cases: list[dict] | None) -> tuple[dict, list[dict]]:
+def _eval_model(
+    model_name: str,
+    pipeline_version: str,
+    use_rag: bool,
+    cases: list[dict] | None,
+    ragas_timeout_sec: int,
+    ragas_max_workers: int,
+) -> tuple[dict, list[dict]]:
     from evaluation.ragas_evaluator import LexGraphEvaluator
 
     prev_model = os.environ.get("OLLAMA_MODEL", "")
@@ -54,6 +69,8 @@ def _eval_model(model_name: str, pipeline_version: str, use_rag: bool, cases: li
             use_local_llm=True,
             pipeline_version=pipeline_version,
             use_wandb=False,
+            ragas_timeout_sec=ragas_timeout_sec,
+            ragas_max_workers=ragas_max_workers,
         )
         dataset = evaluator._generate_answers(cases, use_rag=use_rag)
         scores_raw = evaluator._evaluate(dataset)
@@ -90,13 +107,24 @@ def _build_cases_table(wandb_module, scores: dict, dataset: list[dict], label: s
     return table
 
 
-def compare_four_way(base_model: str, finetuned_model: str, version: str, eval_dataset: str | None) -> None:
+def compare_four_way(
+    base_model: str,
+    finetuned_model: str,
+    version: str,
+    eval_dataset: str | None,
+    max_examples: int,
+    sample_seed: int,
+    ragas_timeout_sec: int,
+    ragas_max_workers: int,
+) -> None:
     try:
         import wandb
     except ImportError:
         raise SystemExit("wandb not installed. Run: pip install wandb")
 
-    cases = _load_cases(eval_dataset)
+    cases = _load_cases(eval_dataset, max_examples=max_examples, seed=sample_seed)
+    if cases is not None:
+        print(f"[4way] loaded {len(cases)} eval cases (max_examples={max_examples})")
 
     run = wandb.init(
         project="lexgraph-finetune",
@@ -110,6 +138,10 @@ def compare_four_way(base_model: str, finetuned_model: str, version: str, eval_d
             "faithfulness_target": FAITHFULNESS_TARGET,
             "answer_relevancy_target": ANSWER_RELEVANCY_TARGET,
             "conditions": ["A_base_no_rag", "B_base_rag", "C_ft_no_rag", "D_ft_rag"],
+            "max_examples": max_examples,
+            "sample_seed": sample_seed,
+            "ragas_timeout_sec": ragas_timeout_sec,
+            "ragas_max_workers": ragas_max_workers,
         },
     )
 
@@ -123,7 +155,14 @@ def compare_four_way(base_model: str, finetuned_model: str, version: str, eval_d
     results: dict[str, dict] = {}
     for key, model_name, use_rag in experiments:
         print(f"\n[4way] Evaluating {key}: model={model_name}, use_rag={use_rag}")
-        scores, dataset = _eval_model(model_name, f"{version}-{key}", use_rag=use_rag, cases=cases)
+        scores, dataset = _eval_model(
+            model_name,
+            f"{version}-{key}",
+            use_rag=use_rag,
+            cases=cases,
+            ragas_timeout_sec=ragas_timeout_sec,
+            ragas_max_workers=ragas_max_workers,
+        )
         results[key] = scores
 
         wandb.log({f"{key}/{m}": scores.get(m, 0) for m in METRICS})
@@ -199,5 +238,23 @@ if __name__ == "__main__":
         default=None,
         help="Optional JSON eval dataset path. If omitted, uses evaluation.test_cases.TEST_CASES",
     )
+    parser.add_argument(
+        "--max_examples",
+        type=int,
+        default=12,
+        help="Number of evaluation rows to run. Keep small first to avoid timeout storms.",
+    )
+    parser.add_argument("--sample_seed", type=int, default=42)
+    parser.add_argument("--ragas_timeout_sec", type=int, default=120)
+    parser.add_argument("--ragas_max_workers", type=int, default=1)
     args = parser.parse_args()
-    compare_four_way(args.base_model, args.finetuned_model, args.version, args.eval_dataset)
+    compare_four_way(
+        args.base_model,
+        args.finetuned_model,
+        args.version,
+        args.eval_dataset,
+        args.max_examples,
+        args.sample_seed,
+        args.ragas_timeout_sec,
+        args.ragas_max_workers,
+    )
